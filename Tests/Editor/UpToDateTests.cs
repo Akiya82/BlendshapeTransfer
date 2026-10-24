@@ -206,7 +206,7 @@ namespace Akiya82.BlendshapeTransfer.Tests
             var run = session.Transfer(false, null);
 
             Assert.That(run.Written, Is.EqualTo(new[] { session.Garments[1] }), "the inner garment is not written");
-            Assert.That(session.Garments[0].ResultsFingerprint, Is.EqualTo(session.Fingerprints()[0]), "but computed as a collider");
+            Assert.That(session.HasCurrentResults(session.Garments[0], session.Fingerprints()[0]), Is.True, "but computed as a collider");
         }
 
         [Test]
@@ -284,15 +284,13 @@ namespace Akiya82.BlendshapeTransfer.Tests
         }
 
         [Test]
-        public void ACancelledGarmentKeepsItsPreviousReportStateAndResults()
+        public void ACancelledGarmentKeepsItsPreviousReportAndState_AndHoldsNoStaleResults()
         {
             var session = Read(Body(), Garment("Inner", 0.002f), Garment("Outer", 0.006f));
             Assert.That(session.Transfer(false, null).Completed, Is.True);
             var outer = session.Garments[1];
             var report = outer.Report;
             var stored = OutputWriter.StateAt(PathOf(outer)).fingerprint;
-            var results = outer.ResultsFingerprint;
-            var bump = outer.Results["Bump"];
             session.Garments[0].Data.settings.smoothIterations = 7;
 
             var run = session.Transfer(false, (info, _) => info.StartsWith("Outer"));
@@ -301,8 +299,8 @@ namespace Akiya82.BlendshapeTransfer.Tests
             Assert.That(run.Written, Is.EqualTo(new[] { session.Garments[0] }), "the inner garment was stale too");
             Assert.That(outer.Report, Is.SameAs(report));
             Assert.That(OutputWriter.StateAt(PathOf(outer)).fingerprint, Is.EqualTo(stored));
-            Assert.That(outer.ResultsFingerprint, Is.EqualTo(results).And.Not.EqualTo(0UL));
-            Assert.That(outer.Results["Bump"], Is.SameAs(bump));
+            // its inputs changed with the inner garment's: the old results count as none, and the cancelled run left no partial ones
+            Assert.That(outer.Results, Is.Empty);
         }
 
         [Test]
@@ -333,7 +331,7 @@ namespace Akiya82.BlendshapeTransfer.Tests
             Assert.That(run.Written, Is.Empty);
             Assert.That(session.Garments[0].Report, Is.Not.Null.And.SameAs(reports[0]), "the reports read from disk");
             Assert.That(session.Garments[1].Report, Is.Not.Null.And.SameAs(reports[1]));
-            Assert.That(session.Garments[0].ResultsFingerprint, Is.EqualTo(0UL), "no results in memory");
+            Assert.That(session.Garments[0].Results, Is.Empty, "no results in memory");
             Assert.That(OutputWriter.StateAt(PathOf(session.Garments[1])).fingerprint, Is.EqualTo(stored));
         }
 

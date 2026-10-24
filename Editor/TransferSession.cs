@@ -25,6 +25,8 @@ namespace Akiya82.BlendshapeTransfer
         public Vector3[][] FinalWorld;
         public Vector3[][] NormalMesh;
         public float MaxMove;
+        /// <summary>The garment's input fingerprint this result was computed under; it counts only while that is still the garment's.</summary>
+        public ulong Fingerprint;
     }
 
     /// <summary>What a transfer did to one garment: numbers and lists, no text (the window renders it).</summary>
@@ -64,8 +66,10 @@ namespace Akiya82.BlendshapeTransfer
         public ulong Content;
         /// <summary>InputFingerprint.SnapshotState of the renderer, taken at the read.</summary>
         public ulong State;
-        /// <summary>The fingerprint the results in memory were computed with; 0 when there are none.</summary>
-        public ulong ResultsFingerprint;
+        /// <summary>The clamped settings (JSON) and rigid marks Rigid and Attached were built for.</summary>
+        public string PreparedFor;
+        public HashSet<int> Rigid;
+        public Attachments Attached;
         public ColliderSurface Collider;
         public SurfacePoint[] Closest;
         public float[] Distance;
@@ -346,11 +350,7 @@ namespace Akiya82.BlendshapeTransfer
             if (ordered.SequenceEqual(Garments)) return false;
             Garments.Clear();
             Garments.AddRange(ordered);
-            foreach (var g in Garments)
-            {
-                g.Results.Clear();
-                g.ResultsFingerprint = 0;
-            }
+            foreach (var g in Garments) g.Results.Clear();
             return true;
         }
 
@@ -360,7 +360,7 @@ namespace Akiya82.BlendshapeTransfer
         /// <summary>
         /// Computes and writes, in layer order, every garment that is not up to date (every garment with all). The lower garments one
         /// collides with are computed in memory first when their results are not current. Cancel or an exception stops the run: the
-        /// garments written before it stay written, the interrupted one keeps its previous report, results and fit records (if the
+        /// garments written before it stay written, the interrupted one keeps its previous report, fit records, and results while still current (if the
         /// output state write itself fails, it is left stale with its records added).
         /// </summary>
         public TransferRun Transfer(bool all, Func<string, float, bool> cancelled)
@@ -376,6 +376,8 @@ namespace Akiya82.BlendshapeTransfer
                     asCollider = false;
                     // after the lower garments this run wrote: their first records may have made this one stale
                     var f = Fingerprints();
+                    // results computed under other inputs count as none
+                    DropStale(f);
                     if (!all && IsUpToDate(Garments[k], f[k]))
                     {
                         run.Skipped.Add(Garments[k]);
@@ -386,7 +388,7 @@ namespace Akiya82.BlendshapeTransfer
                         needed[j] = Collides(k, j) || Enumerable.Range(j + 1, k - j - 1).Any(m => needed[m] && Collides(m, j));
                     for (var j = 0; j < k; j++)
                     {
-                        if (!needed[j] || Garments[j].ResultsFingerprint == f[j]) continue;
+                        if (!needed[j] || HasCurrentResults(Garments[j], f[j])) continue;
                         current = j;
                         asCollider = true;
                         if (!Compute(j, k, collider: f[j], cancelled)) return Cancel(run);
@@ -422,17 +424,7 @@ namespace Akiya82.BlendshapeTransfer
         private bool Compute(int k, int step, ulong? collider, Func<string, float, bool> cancelled)
         {
             var g = Garments[k];
-            // the clamped settings, which the fingerprint hashes: a NaN rigid size must compute as the default it hashes as
-            var settings = g.Data.settings.Clamped();
-            if (g.ReachFalloffZero != FalloffZero(settings)) ComputeReach(g);
-            var json = JsonUtility.ToJson(settings);
-            if (g.Correspondence == null || g.CorrespondenceSettings != json)
-            {
-                g.Correspondence = new Correspondence(Surface, g.Snapshot, settings);
-                g.CorrespondenceSettings = json;
-            }
-            var rigid = DeltaOps.RigidIslands(g.Snapshot.Topology, g.Snapshot.Positions, settings.rigidIslandSize, g.Data.rigidIslandVertices);
-            var attached = new Attachments(g.Snapshot.Topology, g.Snapshot.Positions, rigid, g.Correspondence.Distance);
+            var (rigid, attached) = Prepare(g);
             var report = new GarmentReport();
             var ticked = Ticked(g);
             // a kept vendor shape is not computed, so outer layers clip against it as the garment shows it in game
@@ -446,9 +438,76 @@ namespace Akiya82.BlendshapeTransfer
             }
             var fingerprint = collider ?? Write(k, results, report, ticked);
             g.Results.Clear();
-            foreach (var kv in results) g.Results[kv.Key] = kv.Value;
-            g.ResultsFingerprint = fingerprint;
+            foreach (var kv in results)
+            {
+                kv.Value.Fingerprint = fingerprint;
+                g.Results[kv.Key] = kv.Value;
+            }
             return true;
+        }
+
+        /// <summary>
+        /// What garment g's shapes are computed with, rebuilt only when its inputs changed: its reach again when falloffZero changed, its
+        /// correspondence for its settings, its rigid islands and the islands that ride on the cloth. Transfer and the Edit preview share it.
+        /// </summary>
+        private (HashSet<int> Rigid, Attachments Attached) Prepare(GarmentState g)
+        {
+            // the clamped settings, which the fingerprint hashes: a NaN rigid size must compute as the default it hashes as
+            var settings = g.Data.settings.Clamped();
+            if (g.ReachFalloffZero != FalloffZero(settings)) ComputeReach(g);
+            var json = JsonUtility.ToJson(settings);
+            if (g.Correspondence == null || g.CorrespondenceSettings != json)
+            {
+                g.Correspondence = new Correspondence(Surface, g.Snapshot, settings);
+                g.CorrespondenceSettings = json;
+            }
+            var key = json + "|" + string.Join(",", g.Data.rigidIslandVertices);
+            if (g.PreparedFor != key)
+            {
+                g.Rigid = DeltaOps.RigidIslands(g.Snapshot.Topology, g.Snapshot.Positions, settings.rigidIslandSize, g.Data.rigidIslandVertices);
+                g.Attached = new Attachments(g.Snapshot.Topology, g.Snapshot.Positions, g.Rigid, g.Correspondence.Distance);
+                g.PreparedFor = key;
+            }
+            return (g.Rigid, g.Attached);
+        }
+
+        /// <summary>Garment g computes and writes the body shape: it ticks it and either lacks a shape of that name or overwrites its own.</summary>
+        internal bool WritesShape(GarmentState g, string name) => Ticked(g).Any(e => e.name == name && Written(g, e));
+
+        /// <summary>Every shape garment g writes has a result computed under this fingerprint, so its results can stand in as a collider.</summary>
+        internal bool HasCurrentResults(GarmentState g, ulong fingerprint) =>
+            Ticked(g).Where(e => Written(g, e)).All(e => g.Results.TryGetValue(e.name, out var r) && r.Fingerprint == fingerprint);
+
+        /// <summary>Drops every result computed under a fingerprint that is no longer its garment's: such a result counts as none.</summary>
+        internal void DropStale(IReadOnlyList<ulong> fingerprints)
+        {
+            for (var k = 0; k < Garments.Count; k++)
+            {
+                var results = Garments[k].Results;
+                foreach (var name in results.Where(kv => kv.Value.Fingerprint != fingerprints[k]).Select(kv => kv.Key).ToList()) results.Remove(name);
+            }
+        }
+
+        /// <summary>
+        /// Gives every garment that writes the body shape a result computed under its current inputs, in layer order, so a lower garment's
+        /// result is ready before one above clips against it. Records and writes nothing (no fit records, no output, no shape entry).
+        /// progress hears of each garment it computes, when there is more than one.
+        /// </summary>
+        internal void EnsureShape(string name, Action<string, float> progress = null)
+        {
+            var f = Fingerprints();
+            DropStale(f);
+            var todo = Enumerable.Range(0, Garments.Count).Where(k => WritesShape(Garments[k], name) && !Garments[k].Results.ContainsKey(name)).ToList();
+            for (var i = 0; i < todo.Count; i++)
+            {
+                var g = Garments[todo[i]];
+                if (todo.Count > 1) progress?.Invoke(g.Renderer.name, (float)i / todo.Count);
+                var (rigid, attached) = Prepare(g);
+                var clip = new ClipStats();
+                var result = ComputeShape(todo[i], name, rigid, attached, ref clip);
+                result.Fingerprint = f[todo[i]];
+                g.Results[name] = result;
+            }
         }
 
         /// <summary>Its output asset and output state exist and the state was written with this fingerprint.</summary>
@@ -528,7 +587,7 @@ namespace Akiya82.BlendshapeTransfer
             var shape = Surface.Mesh.GetBlendShapeIndex(name);
             var weights = ShapeMath.FrameWeights(Surface.Mesh, shape);
             var frames = weights.Length;
-            var entry = g.Data.GetOrAddEntry(name);
+            var entry = g.Data.Entry(name);
             var result = new ShapeResult
             {
                 Name = name, FrameWeights = weights, BaseWeight = Surface.Weights[shape],
@@ -565,7 +624,7 @@ namespace Akiya82.BlendshapeTransfer
                 var inside = Enumerable.Repeat(-1, layers.Count).ToArray();
                 result.AutoWorld[f] = TransferPipeline.AutoWorld(g.Correspondence, Surface, snapshot, bodyDeltas[f], rigid, layers, band, ref clip, inside, attached);
                 var auto = MeshSpace.ToMesh(snapshot.Skin, result.AutoWorld[f]);
-                var edit = entry.Edit(f);
+                var edit = entry?.Edit(f);
                 result.FinalMesh[f] = MeshSpace.ApplyEdit(result.BaseMesh != null ? DeltaOps.Add(auto, result.BaseMesh, -1f) : auto, edit);
                 var frame = MeshSpace.ToWorld(snapshot.Skin, result.FinalMesh[f]);
                 result.FinalWorld[f] = DeltaOps.Add(result.BaseWorld, frame, 1f);

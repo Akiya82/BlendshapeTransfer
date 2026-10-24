@@ -81,8 +81,14 @@ namespace Akiya82.BlendshapeTransfer.Tests
                 session.ComputeShape(0, $"Shape{s}", new HashSet<int>(), null, ref clip);
             }
             var shapes = clock.Elapsed.TotalSeconds;
+            // the Edit preview after a settings change: the correspondence again, then the one shape shown
+            session.EnsureShape("Shape0");
+            g.Data.settings.smoothIterations++;
+            clock.Restart();
+            session.EnsureShape("Shape0");
+            var live = clock.Elapsed.TotalSeconds;
             Object.DestroyImmediate(g.Data);
-            Debug.Log($"[Blendshape Transfer] {name} session: open {open:0.00} s, 20 shapes (ComputeShape: anti-clip, both checks, mesh space, normals) {shapes:0.00} s");
+            Debug.Log($"[Blendshape Transfer] {name} session: open {open:0.00} s, 20 shapes (ComputeShape: anti-clip, both checks, mesh space, normals) {shapes:0.00} s, one shape after a settings change {live:0.00} s");
         }
     }
 }
