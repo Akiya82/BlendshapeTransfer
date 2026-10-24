@@ -2,7 +2,8 @@
     "name": "dev.akiya82.blendshapetransfer.editor",
     "rootNamespace": "Akiya82.BlendshapeTransfer",
     "references": [
-        "nadena.dev.modular-avatar.core"
+        "nadena.dev.modular-avatar.core",
+        "nadena.dev.ndmf"
     ],
     "includePlatforms": [
         "Editor"

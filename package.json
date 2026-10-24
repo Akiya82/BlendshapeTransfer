@@ -17,7 +17,8 @@
   },
   "vpmDependencies": {
     "com.vrchat.avatars": ">=3.10.0 <4.0.0-a",
-    "nadena.dev.modular-avatar": ">=1.18.0 <2.0.0-a"
+    "nadena.dev.modular-avatar": ">=1.18.0 <2.0.0-a",
+    "nadena.dev.ndmf": ">=1.14.7 <2.0.0-a"
   },
   "legacyFolders": {
     "Assets\\Akiya82\\BlendshapeTransfer": "19a43656f2670514aab1571b87c5051e"
