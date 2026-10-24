@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags: ['*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read package.json
+        id: pkg
+        run: |
+          name=$(jq -r .name package.json)
+          version=$(jq -r .version package.json)
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+          echo "zip=$name-$version.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Zip the package
+        run: |
+          files="package.json package.json.meta Editor Editor.meta LICENSE LICENSE.meta README.md README.md.meta CHANGELOG.md CHANGELOG.md.meta"
+          for f in $files; do
+            [ -e "$f" ] || { echo "::error::missing $f"; exit 1; }
+          done
+          zip -r "${{ steps.pkg.outputs.zip }}" $files
+          unzip -l "${{ steps.pkg.outputs.zip }}"
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "${{ steps.pkg.outputs.zip }}" --title "$GITHUB_REF_NAME" --notes "See CHANGELOG.md."

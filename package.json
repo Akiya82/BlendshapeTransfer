@@ -1,0 +1,25 @@
+{
+  "name": "dev.akiya82.blendshapetransfer",
+  "displayName": "Blendshape Transfer",
+  "version": "1.0.0",
+  "unity": "2022.3",
+  "description": "Transfers body blendshapes onto clothing meshes and binds them to the body with MA Blendshape Sync.",
+  "author": {
+    "name": "Akiya82",
+    "email": "akiyami@spaceyard.ru",
+    "url": "https://github.com/Akiya82"
+  },
+  "license": "MIT",
+  "documentationUrl": "https://github.com/Akiya82/BlendshapeTransfer#readme",
+  "changelogUrl": "https://github.com/Akiya82/BlendshapeTransfer/blob/main/CHANGELOG.md",
+  "dependencies": {
+    "com.unity.nuget.newtonsoft-json": "3.2.1"
+  },
+  "vpmDependencies": {
+    "com.vrchat.avatars": ">=3.10.0 <4.0.0-a",
+    "nadena.dev.modular-avatar": ">=1.18.0 <2.0.0-a"
+  },
+  "legacyFolders": {
+    "Assets\\Akiya82\\BlendshapeTransfer": "19a43656f2670514aab1571b87c5051e"
+  }
+}
