@@ -244,21 +244,25 @@ namespace Akiya82.BlendshapeTransfer
         }
 
         /// <summary>Candidates inside the collider (signed distance below 0) with the garment and the collider moved by the given deltas.</summary>
-        public static int CountInside(Vector3[] rest, Vector3[] garmentDelta, ColliderSurface collider, ClipCandidates candidates, Vector3[] colliderDelta, float band)
+        public static int CountInside(Vector3[] rest, Vector3[] garmentDelta, ColliderSurface collider, ClipCandidates candidates, Vector3[] colliderDelta, float band) =>
+            Inside(rest, garmentDelta, collider, candidates, colliderDelta, band).Count;
+
+        /// <summary>The garment vertices CountInside counts.</summary>
+        public static List<int> Inside(Vector3[] rest, Vector3[] garmentDelta, ColliderSurface collider, ClipCandidates candidates, Vector3[] colliderDelta, float band)
         {
             var active = Active(rest, garmentDelta, collider, candidates, colliderDelta, band);
             SurfaceQuery query = null;
             var reach = band + MaxMagnitude(colliderDelta) + MaxMagnitude(garmentDelta) + QueryMargin;
-            var count = 0;
+            var inside = new List<int>();
             for (var k = 0; k < candidates.Vertices.Length; k++)
             {
                 if (!active[k]) continue;
                 query ??= collider.Deformed(colliderDelta, 1f);
                 var v = candidates.Vertices[k];
                 var p = rest[v] + garmentDelta[v];
-                if (collider.Hit(query, p, reach, out var hit) && SurfaceQuery.Signed(p, hit) < 0f) count++;
+                if (collider.Hit(query, p, reach, out var hit) && SurfaceQuery.Signed(p, hit) < 0f) inside.Add(v);
             }
-            return count;
+            return inside;
         }
 
         /// <summary>

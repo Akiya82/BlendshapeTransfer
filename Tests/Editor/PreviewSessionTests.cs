@@ -187,5 +187,26 @@ namespace Akiya82.BlendshapeTransfer.Tests
             reference.EnsureShape("Bump");
             AssertSame(session.Garments[1].Results["Bump"], reference.Garments[1].Results["Bump"], "Outer clips against nothing there");
         }
+
+        [Test]
+        public void ClippingAt_SeesALowerLayerOnlyAtTheIntermediateWeight()
+        {
+            var session = Read(Body(), Garment("Inner", 0.002f), Garment("Outer", 0.006f));
+            var lower = session.Garments[0];
+            var n = lower.Snapshot.Positions.Length;
+            // the inner sheet rises 8 mm by weight 50 and is back by 100: the outer one, 4 mm above it, is inside it only in between
+            var up = Enumerable.Repeat(new Vector3(0f, 0f, 0.008f), n).ToArray();
+            lower.Results["Bump"] = new ShapeResult
+            {
+                Name = "Bump", FrameWeights = new[] { 50f, 100f }, BaseWorld = new Vector3[n],
+                FinalWorld = new[] { up, new Vector3[n] }, NormalMesh = new[] { new Vector3[n], new Vector3[n] },
+                Fingerprint = session.Fingerprints()[0],
+            };
+
+            Assert.That(session.ClippingAt(1, "Bump", 0f).Layer, Is.Empty);
+            Assert.That(session.ClippingAt(1, "Bump", 50f).Layer, Is.Not.Empty);
+            Assert.That(session.ClippingAt(1, "Bump", 100f).Layer, Is.Empty);
+            Assert.That(session.ClippingAt(1, "Bump", 50f).Skin, Is.Empty, "the skin rises 5 mm at 50, under the outer sheet at 6 mm");
+        }
     }
 }

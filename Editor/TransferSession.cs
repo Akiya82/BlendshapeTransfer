@@ -775,14 +775,103 @@ namespace Akiya82.BlendshapeTransfer
             var g = Garments[k];
             var layers = new List<AntiClip.Layer> { new AntiClip.Layer { Collider = BodyCollider, Candidates = g.BodyCandidates, Delta = bodyDelta, IsBody = true } };
             for (var j = 0; j < k; j++)
-            {
-                if (!Collides(k, j)) continue;
-                var inner = Garments[j];
-                if (!g.LayerCandidates.TryGetValue(inner, out var candidates))
-                    g.LayerCandidates[inner] = candidates = new ClipCandidates(g.Snapshot.Positions, inner.Collider);
-                layers.Add(new AntiClip.Layer { Collider = inner.Collider, Candidates = candidates, Delta = InnerDelta(inner, name, frame) });
-            }
+                if (Collides(k, j))
+                    layers.Add(new AntiClip.Layer { Collider = Garments[j].Collider, Candidates = CandidatesFor(g, Garments[j]), Delta = InnerDelta(Garments[j], name, frame) });
             return layers;
+        }
+
+        /// <summary>The colliders of garment k with the body shape at weight w, deltas relative to the snapshot: Layers at any weight.</summary>
+        private List<AntiClip.Layer> LayersAt(int k, string name, float w)
+        {
+            var g = Garments[k];
+            var layers = new List<AntiClip.Layer> { new AntiClip.Layer { Collider = BodyCollider, Candidates = g.BodyCandidates, Delta = BodyOffset(name, w), IsBody = true } };
+            for (var j = 0; j < k; j++)
+                if (Collides(k, j))
+                    layers.Add(new AntiClip.Layer { Collider = Garments[j].Collider, Candidates = CandidatesFor(g, Garments[j]), Delta = GarmentOffset(Garments[j], name, w) });
+            return layers;
+        }
+
+        private static ClipCandidates CandidatesFor(GarmentState g, GarmentState inner)
+        {
+            if (!g.LayerCandidates.TryGetValue(inner, out var candidates))
+                g.LayerCandidates[inner] = candidates = new ClipCandidates(g.Snapshot.Positions, inner.Collider);
+            return candidates;
+        }
+
+        /// <summary>The body's world offset from the snapshot with one shape at weight w and the others as in the snapshot, frames interpolated as Unity does.</summary>
+        internal Vector3[] BodyOffset(string name, float w)
+        {
+            var shape = Surface.Mesh.GetBlendShapeIndex(name);
+            var weights = ShapeMath.FrameWeights(Surface.Mesh, shape);
+            var frames = Enumerable.Range(0, weights.Length).Select(f => Surface.WorldDelta(shape, f)).ToArray();
+            var at = new Vector3[Surface.Positions.Length];
+            var atSnapshot = new Vector3[at.Length];
+            ShapeMath.DeltaAt(weights, frames, w, at);
+            ShapeMath.DeltaAt(weights, frames, Surface.Weights[shape], atSnapshot);
+            return DeltaOps.Add(at, atSnapshot, -1f);
+        }
+
+        /// <summary>The body's normal change in mesh space with one shape at weight w instead of its snapshot weight.</summary>
+        internal Vector3[] BodyNormalOffset(string name, float w)
+        {
+            var shape = Surface.Mesh.GetBlendShapeIndex(name);
+            return DeltaOps.Add(ShapeMath.DeltaAt(Surface.Mesh, shape, w, normals: true), ShapeMath.DeltaAt(Surface.Mesh, shape, Surface.Weights[shape], normals: true), -1f);
+        }
+
+        /// <summary>
+        /// Garment g's world offset from the snapshot with the body shape at weight w: its result (the base state plus its frames as Unity
+        /// interpolates them), else its own shape of that name moved from its snapshot weight to w, else null (it does not move). Stale
+        /// results must have been dropped first (EnsureShape, DropStale).
+        /// </summary>
+        internal Vector3[] GarmentOffset(GarmentState g, string name, float w)
+        {
+            if (g.Results.TryGetValue(name, out var r))
+            {
+                // FinalWorld holds the base; its frames over the base interpolate as the written frames do
+                var frames = r.FinalWorld.Select(f => DeltaOps.Add(f, r.BaseWorld, -1f)).ToArray();
+                var at = new Vector3[r.BaseWorld.Length];
+                ShapeMath.DeltaAt(r.FrameWeights, frames, w, at);
+                return DeltaOps.Add(at, r.BaseWorld, 1f);
+            }
+            var mesh = g.Snapshot.Source;
+            var own = mesh.GetBlendShapeIndex(name);
+            if (own < 0) return null;
+            return MeshSpace.ToWorld(g.Snapshot.Skin, DeltaOps.Add(ShapeMath.DeltaAt(mesh, own, w), ShapeMath.DeltaAt(mesh, own, g.Snapshot.Weights[own]), -1f));
+        }
+
+        /// <summary>Garment g's normal change in mesh space at body weight w, matching GarmentOffset; null when it does not move.</summary>
+        internal Vector3[] GarmentNormalOffset(GarmentState g, string name, float w)
+        {
+            if (g.Results.TryGetValue(name, out var r))
+            {
+                var at = new Vector3[r.BaseWorld.Length];
+                ShapeMath.DeltaAt(r.FrameWeights, r.NormalMesh, w, at);
+                return r.BaseNormals == null ? at : DeltaOps.Add(at, r.BaseNormals, 1f);
+            }
+            var mesh = g.Snapshot.Source;
+            var own = mesh.GetBlendShapeIndex(name);
+            if (own < 0) return null;
+            return DeltaOps.Add(ShapeMath.DeltaAt(mesh, own, w, normals: true), ShapeMath.DeltaAt(mesh, own, g.Snapshot.Weights[own], normals: true), -1f);
+        }
+
+        /// <summary>
+        /// Garment k's vertices inside the skin and inside a lower garment it collides with, with the body shape at weight w: the check that
+        /// counts "still clipping" for the report, at any weight. Stale results must have been dropped first.
+        /// </summary>
+        internal (List<int> Skin, List<int> Layer) ClippingAt(int k, string name, float w)
+        {
+            var g = Garments[k];
+            var band = Mathf.Max(AntiClip.MinBand, g.Reach.TryGetValue(name, out var reach) ? reach : 0f);
+            var offset = GarmentOffset(g, name, w) ?? new Vector3[g.Snapshot.Positions.Length];
+            var skin = new List<int>();
+            var layer = new HashSet<int>();
+            foreach (var l in LayersAt(k, name, w))
+            {
+                var inside = AntiClip.Inside(g.Snapshot.Positions, offset, l.Collider, l.Candidates, l.Delta, band);
+                if (l.IsBody) skin.AddRange(inside);
+                else layer.UnionWith(inside);
+            }
+            return (skin, layer.OrderBy(v => v).ToList());
         }
 
         /// <summary>Whether garment k collides with the lower garment j: not when either lists the other as never worn with it.</summary>
