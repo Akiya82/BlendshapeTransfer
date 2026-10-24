@@ -360,8 +360,8 @@ namespace Akiya82.BlendshapeTransfer
         /// <summary>
         /// Computes and writes, in layer order, every garment that is not up to date (every garment with all). The lower garments one
         /// collides with are computed in memory first when their results are not current. Cancel or an exception stops the run: the
-        /// garments written before it stay written, the interrupted one keeps its previous report, fit records, and results while still current (if the
-        /// output state write itself fails, it is left stale with its records added).
+        /// garments written before it stay written, the interrupted one keeps its previous report, fit records, and results
+        /// while still current (if the output state write itself fails, it is left stale with its records added).
         /// </summary>
         public TransferRun Transfer(bool all, Func<string, float, bool> cancelled)
         {
@@ -491,17 +491,19 @@ namespace Akiya82.BlendshapeTransfer
         /// <summary>
         /// Gives every garment that writes the body shape a result computed under its current inputs, in layer order, so a lower garment's
         /// result is ready before one above clips against it. Records and writes nothing (no fit records, no output, no shape entry).
-        /// progress hears of each garment it computes, when there is more than one.
+        /// progress hears of each garment it computes when more than one correspondence has to be built.
         /// </summary>
         internal void EnsureShape(string name, Action<string, float> progress = null)
         {
             var f = Fingerprints();
             DropStale(f);
             var todo = Enumerable.Range(0, Garments.Count).Where(k => WritesShape(Garments[k], name) && !Garments[k].Results.ContainsKey(name)).ToList();
+            // the correspondences are the slow part: progress only when more than one has to be built
+            var builds = todo.Count(k => Garments[k].Correspondence == null || Garments[k].CorrespondenceSettings != JsonUtility.ToJson(Garments[k].Data.settings.Clamped()));
             for (var i = 0; i < todo.Count; i++)
             {
                 var g = Garments[todo[i]];
-                if (todo.Count > 1) progress?.Invoke(g.Renderer.name, (float)i / todo.Count);
+                if (builds > 1) progress?.Invoke(g.Renderer.name, (float)i / todo.Count);
                 var (rigid, attached) = Prepare(g);
                 var clip = new ClipStats();
                 var result = ComputeShape(todo[i], name, rigid, attached, ref clip);
@@ -790,6 +792,7 @@ namespace Akiya82.BlendshapeTransfer
         /// <summary>
         /// World delta of an inner layer relative to its snapshot at a body shape frame (-1: the base state, body weight 0): its
         /// transferred response, else its own shape of that name moved from its snapshot weight to the body's weight, else none.
+        /// A result found here is current: Transfer and EnsureShape drop stale ones first.
         /// </summary>
         private Vector3[] InnerDelta(GarmentState inner, string name, int frame)
         {
