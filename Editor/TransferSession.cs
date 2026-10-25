@@ -860,6 +860,7 @@ namespace Akiya82.BlendshapeTransfer
         /// </summary>
         internal (List<int> Skin, List<int> Layer) ClippingAt(int k, string name, float w)
         {
+            // ponytail: each garment's call moves the body and its lower garments again; build them once per shape and weight if Show clipping lags on release
             var g = Garments[k];
             var band = Mathf.Max(AntiClip.MinBand, g.Reach.TryGetValue(name, out var reach) ? reach : 0f);
             var offset = GarmentOffset(g, name, w) ?? new Vector3[g.Snapshot.Positions.Length];

@@ -207,6 +207,9 @@ namespace Akiya82.BlendshapeTransfer.Tests
             Assert.That(session.ClippingAt(1, "Bump", 50f).Layer, Is.Not.Empty);
             Assert.That(session.ClippingAt(1, "Bump", 100f).Layer, Is.Empty);
             Assert.That(session.ClippingAt(1, "Bump", 50f).Skin, Is.Empty, "the skin rises 5 mm at 50, under the outer sheet at 6 mm");
+            // every candidate sits 4 mm under the risen sheet at 50: the dots are those vertices, not candidate indices
+            Assert.That(session.ClippingAt(1, "Bump", 50f).Layer, Is.EquivalentTo(session.Garments[1].LayerCandidates[lower].Vertices));
+            Assert.That(session.ClippingAt(1, "Bump", 100f).Skin, Is.Not.Empty, "the skin rises 10 mm at 100, through the outer sheet at 6 mm");
         }
     }
 }
