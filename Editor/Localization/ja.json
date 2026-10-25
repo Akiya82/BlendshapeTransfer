@@ -123,7 +123,7 @@
   "settings.antiClip": "めり込み防止",
   "settings.antiClip.tip": "シェイプキーで衣装が肌や下の衣装にめり込む箇所で、衣装を押し出します。",
   "settings.clearance": "隙間 (mm)",
-  "settings.clearance.tip": "めり込み防止が保つ隙間。静止時の衣装自身の隙間を超えることはありません。",
+  "settings.clearance.tip": "めり込み防止が保つ隙間。静止時の衣装自身の隙間を超えませんが、シェイプキーが動かす肌の上では最低 0.2 mm を保ちます。",
   "settings.advanced": "詳細設定",
   "settings.advanced.tip": "距離、フィルター、硬いパーツ、同時に着用しない衣装、再フィット。",
   "settings.falloffFull": "完全追従まで (mm)",

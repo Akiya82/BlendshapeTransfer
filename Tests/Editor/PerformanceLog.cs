@@ -44,6 +44,8 @@ namespace Akiya82.BlendshapeTransfer.Tests
             var correspondenceTime = clock.Elapsed.TotalSeconds - snapshots;
             var bodyCollider = new ColliderSurface(surface.Topology, surface.Positions, null);
             var candidates = new ClipCandidates(snapshot.Positions, bodyCollider);
+            var self = new ColliderSurface(snapshot.Topology, snapshot.Positions, surface);
+            var skin = new SkinCandidates(surface.Positions, self);
             var setup = clock.Elapsed.TotalSeconds;
 
             var stats = new ClipStats();
@@ -52,7 +54,7 @@ namespace Akiya82.BlendshapeTransfer.Tests
             {
                 var delta = surface.WorldDelta(s, 0);
                 var layers = new List<AntiClip.Layer> { new AntiClip.Layer { Collider = bodyCollider, Candidates = candidates, Delta = delta, IsBody = true } };
-                TransferPipeline.AutoWorld(correspondence, surface, snapshot, delta, new HashSet<int>(), layers, 0.02f, ref stats);
+                TransferPipeline.AutoWorld(correspondence, surface, snapshot, delta, new HashSet<int>(), layers, 0.02f, ref stats, self: self, skin: skin);
             }
             var shapes = clock.Elapsed.TotalSeconds;
 
@@ -61,7 +63,7 @@ namespace Akiya82.BlendshapeTransfer.Tests
                 TransferPipeline.Sampled(correspondence, surface, snapshot, surface.WorldDelta(s, 0));
             var sampled = clock.Elapsed.TotalSeconds;
 
-            Debug.Log($"[Blendshape Transfer] {name}: {bodyMesh.vertexCount} body / {garment.sharedMesh.vertexCount} garment vertices: setup {setup:0.00} s, 20 shapes {shapes:0.00} s");
+            Debug.Log($"[Blendshape Transfer] {name}: {bodyMesh.vertexCount} body / {garment.sharedMesh.vertexCount} garment vertices: setup {setup:0.00} s, 20 shapes {shapes:0.00} s, pushed {stats.Pushed}, unresolved {stats.Unresolved}");
             Debug.Log($"[Blendshape Transfer] {name} split: snapshots {snapshots:0.00} s, correspondence {correspondenceTime:0.00} s, sampled (Evaluate+weld+smooth+falloff) 20x {sampled:0.00} s, anti-clip (remainder) 20x {shapes - sampled:0.00} s");
         }
 
@@ -74,12 +76,11 @@ namespace Akiya82.BlendshapeTransfer.Tests
             var g = session.Garments[0];
             g.Data.settings = settings;
             g.Correspondence = new Correspondence(session.Surface, g.Snapshot, settings);
+            // summed over the shapes, as a Transfer sums the garment's report
+            var clip = new ClipStats();
             clock.Restart();
             for (var s = 0; s < 20; s++)
-            {
-                var clip = new ClipStats();
                 session.ComputeShape(0, $"Shape{s}", new HashSet<int>(), null, ref clip);
-            }
             var shapes = clock.Elapsed.TotalSeconds;
             // the Edit preview after a settings change: the correspondence again, then the one shape shown
             session.EnsureShape("Shape0");
@@ -88,7 +89,7 @@ namespace Akiya82.BlendshapeTransfer.Tests
             session.EnsureShape("Shape0");
             var live = clock.Elapsed.TotalSeconds;
             Object.DestroyImmediate(g.Data);
-            Debug.Log($"[Blendshape Transfer] {name} session: open {open:0.00} s, 20 shapes (ComputeShape: anti-clip, both checks, mesh space, normals) {shapes:0.00} s, one shape after a settings change {live:0.00} s");
+            Debug.Log($"[Blendshape Transfer] {name} session: open {open:0.00} s, 20 shapes (ComputeShape: anti-clip, both checks, mesh space, normals) {shapes:0.00} s, one shape after a settings change {live:0.00} s, pushed {clip.Pushed}, unresolved {clip.Unresolved}");
         }
     }
 }

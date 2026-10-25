@@ -26,7 +26,7 @@ namespace Akiya82.BlendshapeTransfer
         /// <param name="inside">
         /// When anti-clip runs, overwritten with its count of candidates still inside each layer at the result; the body layer's count
         /// also holds the skin the skin side left outside the garment. The vertex counts are taken before the skin side, which only
-        /// lifts fabric away from the skin.
+        /// lifts fabric away from the skin under it.
         /// </param>
         /// <param name="self">The garment's own collider; with skin, the skin under it is kept under it too.</param>
         public static Vector3[] AutoWorld(Correspondence c, BodySurface body, GarmentSnapshot garment, Vector3[] bodyDelta,

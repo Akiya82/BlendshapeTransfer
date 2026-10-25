@@ -123,7 +123,7 @@
   "settings.antiClip": "Anti-clip",
   "settings.antiClip.tip": "Push the garment out where a shape would push it into the skin or a lower garment.",
   "settings.clearance": "Clearance (mm)",
-  "settings.clearance.tip": "The gap anti-clip keeps, never more than the garment's own gap at rest.",
+  "settings.clearance.tip": "The gap anti-clip keeps, never more than the garment's own gap at rest; over skin a shape moves, at least 0.2 mm.",
   "settings.advanced": "Advanced",
   "settings.advanced.tip": "Distances, filters, rigid parts, garments not worn together, refit.",
   "settings.falloffFull": "Full effect up to (mm)",

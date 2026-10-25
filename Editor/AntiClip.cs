@@ -51,8 +51,9 @@ namespace Akiya82.BlendshapeTransfer
 
         /// <summary>
         /// The collider moved by scale × delta (ponytail: rebuilds a grid per call, ~20 ms on 25k vertices; the skin side rebuilds the
-        /// garment's once per lift round, up to Rounds + 1 a frame, and a frame with a hand edit builds the full-weight colliders again
-        /// for its check; cache per delta if live recompute is too slow, seed from rest triangles if Transfer is).
+        /// garment's once per lift round, up to Rounds + 1 a frame, plus one for the midpoint check, and a frame with a hand edit builds
+        /// the full-weight colliders again for its check; cache per delta if live recompute is too slow, seed from rest triangles if
+        /// Transfer is).
         /// </summary>
         public SurfaceQuery Deformed(Vector3[] delta, float scale)
         {
@@ -116,7 +117,7 @@ namespace Akiya82.BlendshapeTransfer
         /// How far under the sheet skin is looked for, metres (ponytail: a skirt hanging farther over a thigh shape is not lifted;
         /// raise it if one clips).
         /// </summary>
-        public const float Reach = 0.1f;
+        public const float Depth = 0.1f;
         public readonly int[] Vertices;
         public readonly float[] RestGap;
 
@@ -130,12 +131,12 @@ namespace Akiya82.BlendshapeTransfer
             }
             var bounds = new Bounds(garment.Rest[0], Vector3.zero);
             foreach (var p in garment.Rest) bounds.Encapsulate(p);
-            bounds.Expand(2f * Reach);
+            bounds.Expand(2f * Depth);
             var vertices = new List<int>();
             var gaps = new List<float>();
             for (var b = 0; b < bodyRest.Length; b++)
             {
-                if (!bounds.Contains(bodyRest[b]) || !garment.Hit(garment.RestQuery, bodyRest[b], Reach, out var hit)) continue;
+                if (!bounds.Contains(bodyRest[b]) || !garment.Hit(garment.RestQuery, bodyRest[b], Depth, out var hit)) continue;
                 var s = SurfaceQuery.Signed(bodyRest[b], hit);
                 if (s > 0f) continue;
                 vertices.Add(b);
@@ -154,7 +155,10 @@ namespace Akiya82.BlendshapeTransfer
         public int StillSkin;
         public int StillLayer;
         public int Intermediate;
-        /// <summary>Garment vertices still closer than their target after the last round.</summary>
+        /// <summary>
+        /// Vertices still short of their target after the last round, garment vertices near a collider or fabric over skin; one left
+        /// by both sides counts twice.
+        /// </summary>
         public int Unresolved;
     }
 
@@ -252,22 +256,7 @@ namespace Akiya82.BlendshapeTransfer
                         if (push[v] != Vector3.zero) stats.Unresolved++;
                     break;
                 }
-                Feather(topology, push);
-                foreach (var island in rigidIslands)
-                {
-                    var deepest = Vector3.zero;
-                    foreach (var v in topology.IslandVertices[island])
-                        if (push[v].sqrMagnitude > deepest.sqrMagnitude) deepest = push[v];
-                    foreach (var v in topology.IslandVertices[island]) push[v] = deepest;
-                }
-                for (var v = 0; v < delta.Length; v++)
-                {
-                    moved[v] = push[v] != Vector3.zero;
-                    if (!moved[v]) continue;
-                    delta[v] += push[v];
-                    if (!pushed[v]) { pushed[v] = true; stats.Pushed++; }
-                    stats.MaxPush = Mathf.Max(stats.MaxPush, push[v].magnitude);
-                }
+                AddPushes(topology, delta, push, rigidIslands, pushed, moved, ref stats);
             }
 
             var inside = new int[layers.Count];
@@ -309,12 +298,13 @@ namespace Akiya82.BlendshapeTransfer
             if (active.Count == 0) return 0;
             var t = topology.Triangles;
             var push = new Vector3[delta.Length];
+            var bodyMove = MaxMagnitude(bodyDelta);
             // the round after the last one only counts what is left
             for (var round = 0; ; round++)
             {
                 Array.Clear(push, 0, push.Length);
                 var query = garment.Deformed(delta, 1f);
-                var reach = band + MaxMagnitude(bodyDelta) + MaxMagnitude(delta) + QueryMargin;
+                var reach = band + bodyMove + MaxMagnitude(delta) + QueryMargin;
                 var any = false;
                 var outside = 0;
                 foreach (var k in active)
@@ -338,28 +328,39 @@ namespace Akiya82.BlendshapeTransfer
                     any = true;
                 }
                 // with nothing to lift every hit is under the sheet, so outside is 0
-                if (!any) return outside;
+                if (!any) return 0;
                 if (round == Rounds)
                 {
                     for (var v = 0; v < push.Length; v++)
                         if (push[v] != Vector3.zero) stats.Unresolved++;
                     return outside;
                 }
-                Feather(topology, push);
-                foreach (var island in rigidIslands)
-                {
-                    var deepest = Vector3.zero;
-                    foreach (var v in topology.IslandVertices[island])
-                        if (push[v].sqrMagnitude > deepest.sqrMagnitude) deepest = push[v];
-                    foreach (var v in topology.IslandVertices[island]) push[v] = deepest;
-                }
-                for (var v = 0; v < delta.Length; v++)
-                {
-                    if (push[v] == Vector3.zero) continue;
-                    delta[v] += push[v];
-                    if (!pushed[v]) { pushed[v] = true; stats.Pushed++; }
-                    stats.MaxPush = Mathf.Max(stats.MaxPush, push[v].magnitude);
-                }
+                AddPushes(topology, delta, push, rigidIslands, pushed, null, ref stats);
+            }
+        }
+
+        /// <summary>
+        /// Feathers push, moves each rigid island by its deepest push and adds the pushes to delta, counting the vertices not yet in
+        /// pushed and the largest push. moved, when given, marks the vertices pushed this time.
+        /// </summary>
+        private static void AddPushes(Topology topology, Vector3[] delta, Vector3[] push, HashSet<int> rigidIslands, bool[] pushed, bool[] moved, ref ClipStats stats)
+        {
+            Feather(topology, push);
+            foreach (var island in rigidIslands)
+            {
+                var deepest = Vector3.zero;
+                foreach (var v in topology.IslandVertices[island])
+                    if (push[v].sqrMagnitude > deepest.sqrMagnitude) deepest = push[v];
+                foreach (var v in topology.IslandVertices[island]) push[v] = deepest;
+            }
+            for (var v = 0; v < delta.Length; v++)
+            {
+                var any = push[v] != Vector3.zero;
+                if (moved != null) moved[v] = any;
+                if (!any) continue;
+                delta[v] += push[v];
+                if (!pushed[v]) { pushed[v] = true; stats.Pushed++; }
+                stats.MaxPush = Mathf.Max(stats.MaxPush, push[v].magnitude);
             }
         }
 

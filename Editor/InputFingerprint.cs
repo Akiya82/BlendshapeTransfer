@@ -59,7 +59,7 @@ namespace Akiya82.BlendshapeTransfer
     internal static class InputFingerprint
     {
         /// <summary>Raised whenever a code change changes transfer results, so older outputs become stale; tests replace it.</summary>
-        internal static int PipelineVersion = 3;
+        internal static int PipelineVersion = 4;
 
         public static string Hex(ulong fingerprint) => fingerprint.ToString("x16");
 

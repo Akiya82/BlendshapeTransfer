@@ -791,13 +791,13 @@ namespace Akiya82.BlendshapeTransfer.Tests
             Assert.That(again.Garments[0].Data.settings.smoothIterations, Is.Not.EqualTo(11));
         }
 
-        /// <summary>A body grid 0.5 mm apart with a nub 3 mm in radius and 5 mm high at its centre, and fabric 5 mm apart 2 mm above it whose vertices nearest the nub sit 3.5 mm from its axis.</summary>
-        private (SkinnedMeshRenderer Body, SkinnedMeshRenderer Garment) Nub()
+        /// <summary>A body grid 0.5 mm apart with a nub 3 mm in radius and 5 mm high at its centre, and fabric 5 mm apart at height fabricZ whose vertices nearest the nub sit 3.5 mm from its axis.</summary>
+        private (SkinnedMeshRenderer Body, SkinnedMeshRenderer Garment) Nub(float fabricZ = 0.002f)
         {
             var bodyMesh = MeshFactory.Grid(MeshFactory.Range(-0.02f, 0.02f, 81), MeshFactory.Range(-0.02f, 0.02f, 81), 0f);
             MeshFactory.AddShape(bodyMesh, "Nub", MeshFactory.Bump(0.005f, 0.003f));
             var body = rig.AddRenderer("Body", Saved(bodyMesh, "Body"), "Hips");
-            var fabric = MeshFactory.Grid(MeshFactory.Range(-0.0175f, 0.0175f, 8), MeshFactory.Range(-0.0175f, 0.0175f, 8), 0.002f);
+            var fabric = MeshFactory.Grid(MeshFactory.Range(-0.0175f, 0.0175f, 8), MeshFactory.Range(-0.0175f, 0.0175f, 8), fabricZ);
             return (body, rig.AddRenderer("Top", Saved(fabric, "Top"), "Hips"));
         }
 
@@ -828,6 +828,7 @@ namespace Akiya82.BlendshapeTransfer.Tests
             var (body, garment) = Nub();
             var session = TransferSession.Open(body, new[] { garment }, errors);
             var g = session.Garments[0];
+            g.Data.GetOrAddEntry("Nub").enabled = true;
             g.Data.settings.antiClip = false;
 
             Assert.That(session.Transfer(null), Is.True);
@@ -855,6 +856,45 @@ namespace Akiya82.BlendshapeTransfer.Tests
         }
 
         [Test]
+        public void Transfer_CapsTheFloorOverSkinByHowFarTheShapeMovedIt()
+        {
+            var bodyMesh = MeshFactory.Grid(MeshFactory.Range(-0.1f, 0.1f, 41), MeshFactory.Range(-0.1f, 0.1f, 41), 0f);
+            // under the tick threshold; 0.02 mm, since Unity stores a delta of 0.01 mm as zero
+            MeshFactory.AddShape(bodyMesh, "Rise", _ => new Vector3(0f, 0f, 0.00002f));
+            var body = rig.AddRenderer("Body", Saved(bodyMesh, "Body"), "Hips");
+            var garment = Garment("Bikini", 0.0001f);
+            var session = TransferSession.Open(body, new[] { garment }, errors);
+            var g = session.Garments[0];
+            g.Data.GetOrAddEntry("Rise").enabled = true;
+
+            Assert.That(session.Transfer(null), Is.True);
+
+            var centre = new Vector3(0f, 0f, 0.00002f);
+            Assert.That(g.Collider.Hit(g.Collider.Deformed(g.Results["Rise"].FinalWorld[0], 1f), centre, 0.05f, out var hit), Is.True);
+            Assert.That(SurfaceQuery.Signed(centre, hit), Is.GreaterThan(-0.00015f), "a 0.02 mm move keeps the 0.1 mm gap, not lifted to 0.2 mm");
+        }
+
+        [Test]
+        public void Transfer_ReportsSkinTheLiftRoundsLeftOutsideARigidTube()
+        {
+            var bodyMesh = MeshFactory.Cylinder(0f, 0f, 0.05f, 0.85f, 0.95f, 64, 20);
+            MeshFactory.AddShape(bodyMesh, "Thick", p => new Vector3(p.x, 0f, p.z).normalized * 0.002f);
+            var body = rig.AddRenderer("Body", Saved(bodyMesh, "Body"), "Hips");
+            var tube = rig.AddRenderer("Tube", Saved(MeshFactory.Cylinder(0f, 0f, 0.052f, 0.87f, 0.93f, 16, 4), "Tube"), "Hips");
+            var session = TransferSession.Open(body, new[] { tube }, errors);
+            var g = session.Garments[0];
+            g.Data.settings.rigidIslandSize = 1f;
+            g.Data.GetOrAddEntry("Thick").enabled = true;
+
+            Assert.That(session.Transfer(null), Is.True);
+
+            var outside = AntiClip.SkinOutside(session.Surface.Positions, session.BodyOffset("Thick", 100f), g.Collider, g.SkinCandidates,
+                g.Results["Thick"].FinalWorld[0], AntiClip.MinBand).Count;
+            Assert.That(outside, Is.GreaterThan(0), "the tube moves by its deepest push, so one side clips more");
+            Assert.That(g.Report.Clip.StillSkin, Is.GreaterThanOrEqualTo(outside));
+        }
+
+        [Test]
         public void Reach_TakesTheSkinUnderTheGarment_SoANubBetweenItsVerticesIsTicked()
         {
             var (body, garment) = Nub();
@@ -863,6 +903,17 @@ namespace Akiya82.BlendshapeTransfer.Tests
 
             Assert.That(session.Garments[0].Reach["Nub"], Is.EqualTo(0.005f).Within(0.0002f));
             Assert.That(session.Garments[0].Data.Entry("Nub")?.enabled, Is.True, "ticked at the first read");
+        }
+
+        [Test]
+        public void Reach_TakesTheSkinUnderTheGarmentBackToWeightZero_WhenFittedAtFullWeight()
+        {
+            var (body, garment) = Nub(0.006f);
+            body.SetBlendShapeWeight(body.sharedMesh.GetBlendShapeIndex("Nub"), 100f);
+
+            var session = TransferSession.Open(body, new[] { garment }, errors);
+
+            Assert.That(session.Garments[0].Reach["Nub"], Is.EqualTo(0.005f).Within(0.0002f), "the tip under the fabric falls 5 mm");
         }
     }
 }

@@ -123,7 +123,7 @@
   "settings.antiClip": "防穿模",
   "settings.antiClip.tip": "在形态键会把服装压进皮肤或下层服装的地方，把服装推出来。",
   "settings.clearance": "间隙 (mm)",
-  "settings.clearance.tip": "防穿模保持的间隙，不会超过服装静止时自身的间隙。",
+  "settings.clearance.tip": "防穿模保持的间隙，不超过服装静止时自身的间隙；在形态键移动的皮肤上方至少保持 0.2 mm。",
   "settings.advanced": "高级",
   "settings.advanced.tip": "距离、过滤、刚性部件、不同时穿着的服装、重新适配。",
   "settings.falloffFull": "完全跟随距离 (mm)",
