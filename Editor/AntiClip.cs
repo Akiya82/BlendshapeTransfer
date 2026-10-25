@@ -106,6 +106,40 @@ namespace Akiya82.BlendshapeTransfer
         }
     }
 
+    /// <summary>
+    /// Body vertices under a garment sheet at rest (a hit on the garment within the cone, signed distance not above 0), with their gap
+    /// to it: the skin that can come through the fabric between its vertices.
+    /// </summary>
+    internal sealed class SkinCandidates
+    {
+        /// <summary>
+        /// How far under the sheet skin is looked for, metres (ponytail: a skirt hanging farther over a thigh shape is not lifted;
+        /// raise it if one clips).
+        /// </summary>
+        public const float Reach = 0.1f;
+        public readonly int[] Vertices;
+        public readonly float[] RestGap;
+
+        public SkinCandidates(Vector3[] bodyRest, ColliderSurface garment)
+        {
+            var bounds = new Bounds(garment.Rest[0], Vector3.zero);
+            foreach (var p in garment.Rest) bounds.Encapsulate(p);
+            bounds.Expand(2f * Reach);
+            var vertices = new List<int>();
+            var gaps = new List<float>();
+            for (var b = 0; b < bodyRest.Length; b++)
+            {
+                if (!bounds.Contains(bodyRest[b]) || !garment.Hit(garment.RestQuery, bodyRest[b], Reach, out var hit)) continue;
+                var s = SurfaceQuery.Signed(bodyRest[b], hit);
+                if (s > 0f) continue;
+                vertices.Add(b);
+                gaps.Add(-s);
+            }
+            Vertices = vertices.ToArray();
+            RestGap = gaps.ToArray();
+        }
+    }
+
     [Serializable]
     public struct ClipStats
     {
@@ -122,6 +156,11 @@ namespace Akiya82.BlendshapeTransfer
     {
         public const int Rounds = 3;
         public const float MinBand = 0.02f;
+        /// <summary>
+        /// The fabric is kept at least this far over skin a shape moves, also where it touched the skin at rest, so coincident fabric
+        /// does not show the skin through it.
+        /// </summary>
+        public const float SkinFloor = 0.0002f;
         private const float QueryMargin = 0.05f;
         /// <summary>Added to the reach of a moved collider vertex in <see cref="Active"/>: welded duplicates and rounding.</summary>
         private const float ActiveMargin = 0.001f;
@@ -241,6 +280,88 @@ namespace Akiya82.BlendshapeTransfer
                 }
             }
             return inside;
+        }
+
+        /// <summary>
+        /// The skin side of anti-clip. Skin the shape moves (skin candidates within band, body delta not zero) that ends closer under
+        /// the deformed garment than max(min(gap, clearance), SkinFloor), or outside it, lifts the hit triangle along its face normal by
+        /// the least change of its corners. Pushes are feathered and a rigid island moves by its deepest push, as in Apply, for at most
+        /// Rounds rounds. It catches skin passing between garment vertices, which Apply cannot see. delta (world) is changed in place.
+        /// </summary>
+        public static void LiftOverSkin(Topology topology, Vector3[] delta, ColliderSurface garment, SkinCandidates skin,
+            Vector3[] bodyRest, Vector3[] bodyDelta, float band, float clearance, HashSet<int> rigidIslands, ref ClipStats stats)
+        {
+            if (bodyDelta == null) return;
+            var active = new List<int>();
+            for (var k = 0; k < skin.Vertices.Length; k++)
+                if (skin.RestGap[k] <= band && !DeltaOps.IsZero(bodyDelta[skin.Vertices[k]])) active.Add(k);
+            if (active.Count == 0) return;
+            var t = topology.Triangles;
+            var push = new Vector3[delta.Length];
+            for (var round = 0; ; round++)
+            {
+                Array.Clear(push, 0, push.Length);
+                var query = garment.Deformed(delta, 1f);
+                var reach = band + MaxMagnitude(bodyDelta) + MaxMagnitude(delta) + QueryMargin;
+                var any = false;
+                foreach (var k in active)
+                {
+                    var b = skin.Vertices[k];
+                    var p = bodyRest[b] + bodyDelta[b];
+                    if (!garment.Hit(query, p, reach, out var hit)) continue;
+                    // the skin point is under the sheet when signed is negative: lift what is missing to the target gap
+                    var lift = SurfaceQuery.Signed(p, hit) + Mathf.Max(Mathf.Min(skin.RestGap[k], clearance), SkinFloor);
+                    if (lift <= 0f) continue;
+                    var bary = hit.Bary;
+                    var squares = bary.x * bary.x + bary.y * bary.y + bary.z * bary.z;
+                    for (var c = 0; c < 3; c++)
+                    {
+                        var need = hit.Normal * (lift * bary[c] / squares);
+                        var v = t[3 * hit.Triangle + c];
+                        if (need.sqrMagnitude > push[v].sqrMagnitude) push[v] = need;
+                    }
+                    any = true;
+                }
+                if (!any) break;
+                if (round == Rounds)
+                {
+                    for (var v = 0; v < push.Length; v++)
+                        if (push[v] != Vector3.zero) stats.Unresolved++;
+                    break;
+                }
+                Feather(topology, push);
+                foreach (var island in rigidIslands)
+                {
+                    var deepest = Vector3.zero;
+                    foreach (var v in topology.IslandVertices[island])
+                        if (push[v].sqrMagnitude > deepest.sqrMagnitude) deepest = push[v];
+                    foreach (var v in topology.IslandVertices[island]) push[v] = deepest;
+                }
+                for (var v = 0; v < delta.Length; v++)
+                {
+                    if (push[v] == Vector3.zero) continue;
+                    delta[v] += push[v];
+                    stats.MaxPush = Mathf.Max(stats.MaxPush, push[v].magnitude);
+                }
+            }
+        }
+
+        /// <summary>The skin candidates (body vertex indices) the shape moves that end outside the garment sheet, with the body and the garment moved by the given deltas.</summary>
+        public static List<int> SkinOutside(Vector3[] bodyRest, Vector3[] bodyDelta, ColliderSurface garment, SkinCandidates skin, Vector3[] garmentDelta, float band)
+        {
+            var outside = new List<int>();
+            if (bodyDelta == null) return outside;
+            SurfaceQuery query = null;
+            var reach = band + MaxMagnitude(bodyDelta) + MaxMagnitude(garmentDelta) + QueryMargin;
+            for (var k = 0; k < skin.Vertices.Length; k++)
+            {
+                var b = skin.Vertices[k];
+                if (skin.RestGap[k] > band || DeltaOps.IsZero(bodyDelta[b])) continue;
+                query ??= garment.Deformed(garmentDelta, 1f);
+                var p = bodyRest[b] + bodyDelta[b];
+                if (garment.Hit(query, p, reach, out var hit) && SurfaceQuery.Signed(p, hit) > 0f) outside.Add(b);
+            }
+            return outside;
         }
 
         /// <summary>Candidates inside the collider (signed distance below 0) with the garment and the collider moved by the given deltas.</summary>

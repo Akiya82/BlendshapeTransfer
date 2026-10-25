@@ -77,9 +77,11 @@ namespace Akiya82.BlendshapeTransfer
         /// <summary>The settings Correspondence was built from, as JSON (its own copy is clamped, so it cannot be compared).</summary>
         public string CorrespondenceSettings;
         public ClipCandidates BodyCandidates;
+        /// <summary>Body vertices under the garment at rest: reach counts their motion, anti-clip keeps them under it.</summary>
+        public SkinCandidates SkinCandidates;
         public readonly Dictionary<GarmentState, ClipCandidates> LayerCandidates = new Dictionary<GarmentState, ClipCandidates>();
         public readonly Dictionary<string, ShapeResult> Results = new Dictionary<string, ShapeResult>();
-        /// <summary>Per body shape, the largest skin motion from the snapshot to weight 0 or any frame weight, under the garment's vertices within falloffZero, metres.</summary>
+        /// <summary>Per body shape, the largest skin motion from the snapshot to weight 0 or any frame weight, under the garment within falloffZero, metres.</summary>
         public readonly Dictionary<string, float> Reach = new Dictionary<string, float>();
         /// <summary>The falloffZero Reach was computed for.</summary>
         public float ReachFalloffZero;
@@ -612,7 +614,7 @@ namespace Akiya82.BlendshapeTransfer
             var rest = snapshot.MeshPositions;
             if (bodyBase != null)
             {
-                result.BaseMesh = MeshSpace.ToMesh(snapshot.Skin, TransferPipeline.AutoWorld(g.Correspondence, Surface, snapshot, bodyBase, rigid, layers, band, ref clip, attached: attached));
+                result.BaseMesh = MeshSpace.ToMesh(snapshot.Skin, TransferPipeline.AutoWorld(g.Correspondence, Surface, snapshot, bodyBase, rigid, layers, band, ref clip, attached: attached, self: g.Collider, skin: g.SkinCandidates));
                 result.BaseNormals = MeshSpace.NormalDeltas(snapshot.Topology, rest, result.BaseMesh);
                 rest = DeltaOps.Add(rest, result.BaseMesh, 1f);
             }
@@ -624,7 +626,7 @@ namespace Akiya82.BlendshapeTransfer
                 var previousGarment = f > 0 ? result.FinalWorld[f - 1] : result.BaseWorld;
                 layers = Layers(k, name, f, bodyDeltas[f]);
                 var inside = Enumerable.Repeat(-1, layers.Count).ToArray();
-                result.AutoWorld[f] = TransferPipeline.AutoWorld(g.Correspondence, Surface, snapshot, bodyDeltas[f], rigid, layers, band, ref clip, inside, attached);
+                result.AutoWorld[f] = TransferPipeline.AutoWorld(g.Correspondence, Surface, snapshot, bodyDeltas[f], rigid, layers, band, ref clip, inside, attached, g.Collider, g.SkinCandidates);
                 var auto = MeshSpace.ToMesh(snapshot.Skin, result.AutoWorld[f]);
                 var edit = entry?.Edit(f);
                 result.FinalMesh[f] = MeshSpace.ApplyEdit(result.BaseMesh != null ? DeltaOps.Add(auto, result.BaseMesh, -1f) : auto, edit);
@@ -645,6 +647,9 @@ namespace Akiya82.BlendshapeTransfer
                     else clip.StillLayer += still;
                     clip.Intermediate += AntiClip.CountInside(snapshot.Positions, midGarment, layer.Collider, layer.Candidates, Mid(previous[i].Delta, layer.Delta), band);
                 }
+                // skin the fabric lets through between its vertices, which the vertex counts above cannot see
+                clip.StillSkin += AntiClip.SkinOutside(Surface.Positions, bodyDeltas[f], g.Collider, g.SkinCandidates, result.FinalWorld[f], band).Count;
+                clip.Intermediate += AntiClip.SkinOutside(Surface.Positions, Mid(previous[0].Delta, bodyDeltas[f]), g.Collider, g.SkinCandidates, midGarment, band).Count;
             }
             return result;
         }
@@ -690,6 +695,7 @@ namespace Akiya82.BlendshapeTransfer
                 state.Distance[v] = Surface.Query.Closest(state.Snapshot.Positions[v], 1f, null, out state.Closest[v]) ? state.Closest[v].Distance : float.PositiveInfinity;
             state.Collider = new ColliderSurface(state.Snapshot.Topology, state.Snapshot.Positions, Surface);
             state.BodyCandidates = new ClipCandidates(state.Snapshot.Positions, BodyCollider);
+            state.SkinCandidates = new SkinCandidates(Surface.Positions, state.Collider);
             ComputeReach(state);
             var stored = AssetDatabase.Contains(data) ? OutputWriter.StateAt(AssetDatabase.GetAssetPath(data)) : null;
             // default ticks only before the first output: a new tick would make a read alone turn an up-to-date garment stale
@@ -702,15 +708,18 @@ namespace Akiya82.BlendshapeTransfer
         }
 
         /// <summary>
-        /// Per body shape, the largest skin motion under the garment's vertices within falloffZero: |D(w) − D(W₀)| at their closest skin
-        /// point over w = 0 and every frame weight, the states the pipeline computes. D is piecewise linear in w, so those weights hold
-        /// the maximum. It sets the shape list, the default ticks, the fit records and the anti-clip band.
+        /// Per body shape, the largest skin motion under the garment within falloffZero: |D(w) − D(W₀)| over w = 0 and every frame
+        /// weight, at the closest skin point of its vertices and at the body vertices under it. D is piecewise linear in w, so those
+        /// weights hold the maximum. It sets the shape list, the default ticks, the fit records and the anti-clip band.
         /// </summary>
         private void ComputeReach(GarmentState state)
         {
             var mesh = Surface.Mesh;
             var zero = FalloffZero(state.Data.settings);
             var near = Enumerable.Range(0, state.Distance.Length).Where(v => state.Distance[v] <= zero).ToArray();
+            // the skin under the garment, so a shape smaller than its edges still reaches it
+            var under = Enumerable.Range(0, state.SkinCandidates.Vertices.Length).Where(k => state.SkinCandidates.RestGap[k] <= zero)
+                .Select(k => state.SkinCandidates.Vertices[k]).ToArray();
             var count = mesh.vertexCount;
             var atSnapshot = new Vector3[count];
             var buffers = new List<Vector3[]>();
@@ -729,6 +738,11 @@ namespace Akiya82.BlendshapeTransfer
                     // weight 0: the skin moves by −D(W₀)
                     max = Mathf.Max(max, atBase.magnitude);
                     foreach (var frame in frames) max = Mathf.Max(max, (Surface.At(p, frame) - atBase).magnitude);
+                }
+                foreach (var b in under)
+                {
+                    max = Mathf.Max(max, atSnapshot[b].magnitude);
+                    foreach (var frame in frames) max = Mathf.Max(max, (frame[b] - atSnapshot[b]).magnitude);
                 }
                 state.Reach[mesh.GetBlendShapeName(shape)] = max;
             }

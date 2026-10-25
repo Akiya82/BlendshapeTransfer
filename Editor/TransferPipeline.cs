@@ -24,8 +24,10 @@ namespace Akiya82.BlendshapeTransfer
         /// keep their order and the attached islands ride on the cloth where it ended. World space.
         /// </summary>
         /// <param name="inside">When anti-clip runs, overwritten with its count of candidates still inside each layer at the result.</param>
+        /// <param name="self">The garment's own collider; with skin, the skin under it is kept under it too.</param>
         public static Vector3[] AutoWorld(Correspondence c, BodySurface body, GarmentSnapshot garment, Vector3[] bodyDelta,
-            HashSet<int> rigidIslands, IReadOnlyList<AntiClip.Layer> layers, float band, ref ClipStats stats, int[] inside = null, Attachments attached = null)
+            HashSet<int> rigidIslands, IReadOnlyList<AntiClip.Layer> layers, float band, ref ClipStats stats, int[] inside = null, Attachments attached = null,
+            ColliderSurface self = null, SkinCandidates skin = null)
         {
             var delta = Sampled(c, body, garment, bodyDelta, rigidIslands);
             DeltaOps.Rigid(garment.Topology, garment.Positions, delta, rigidIslands);
@@ -34,6 +36,9 @@ namespace Akiya82.BlendshapeTransfer
             {
                 var counts = AntiClip.Apply(garment.Topology, garment.Positions, delta, layers, band, c.Settings.clearance, rigidIslands, ref stats);
                 if (inside != null) Array.Copy(counts, inside, counts.Length);
+                // skin passing between the garment's vertices, which the vertex check cannot see
+                if (self != null && skin != null)
+                    AntiClip.LiftOverSkin(garment.Topology, delta, self, skin, body.Positions, bodyDelta, band, c.Settings.clearance, rigidIslands, ref stats);
                 bodyLayer = layers.FirstOrDefault(l => l.IsBody && l.Delta == bodyDelta);
             }
             // the deformed body collider holds the deformed body's normals; anti-clip usually built it already, otherwise it is built

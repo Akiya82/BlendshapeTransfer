@@ -790,5 +790,63 @@ namespace Akiya82.BlendshapeTransfer.Tests
 
             Assert.That(again.Garments[0].Data.settings.smoothIterations, Is.Not.EqualTo(11));
         }
+
+        /// <summary>A body grid 0.5 mm apart with a nub 3 mm in radius and 5 mm high at its centre, and fabric 5 mm apart 2 mm above it whose vertices nearest the nub sit 3.5 mm from its tip.</summary>
+        private (SkinnedMeshRenderer Body, SkinnedMeshRenderer Garment) Nub()
+        {
+            var bodyMesh = MeshFactory.Grid(MeshFactory.Range(-0.02f, 0.02f, 81), MeshFactory.Range(-0.02f, 0.02f, 81), 0f);
+            MeshFactory.AddShape(bodyMesh, "Nub", MeshFactory.Bump(0.005f, 0.003f));
+            var body = rig.AddRenderer("Body", Saved(bodyMesh, "Body"), "Hips");
+            var fabric = MeshFactory.Grid(MeshFactory.Range(-0.0175f, 0.0175f, 8), MeshFactory.Range(-0.0175f, 0.0175f, 8), 0.002f);
+            return (body, rig.AddRenderer("Top", Saved(fabric, "Top"), "Hips"));
+        }
+
+        [Test]
+        public void Transfer_LiftsSparseFabricOverANubBetweenItsVertices()
+        {
+            var (body, garment) = Nub();
+            var session = TransferSession.Open(body, new[] { garment }, errors);
+            var g = session.Garments[0];
+            g.Data.GetOrAddEntry("Nub").enabled = true;
+
+            Assert.That(session.Transfer(null), Is.True);
+
+            var bodyDelta = session.BodyOffset("Nub", 100f);
+            var result = g.Results["Nub"];
+            Assert.That(AntiClip.SkinOutside(session.Surface.Positions, bodyDelta, g.Collider, g.SkinCandidates, result.FinalWorld[0], AntiClip.MinBand), Is.Empty,
+                "no skin ends outside the fabric");
+            var tip = new Vector3(0f, 0f, 0.005f);
+            Assert.That(g.Collider.Hit(g.Collider.Deformed(result.FinalWorld[0], 1f), tip, 0.05f, out var hit), Is.True);
+            Assert.That(SurfaceQuery.Signed(tip, hit), Is.LessThan(-0.0009f), "the tip stays under the fabric by about the 1 mm clearance");
+            Assert.That(g.Report.Clip.StillSkin, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void Transfer_KeepsFabricThatTouchedTheSkin_AFloorOverSkinAShapeLifts()
+        {
+            var bodyMesh = MeshFactory.Grid(MeshFactory.Range(-0.1f, 0.1f, 41), MeshFactory.Range(-0.1f, 0.1f, 41), 0f);
+            MeshFactory.AddShape(bodyMesh, "Rise", _ => new Vector3(0f, 0f, 0.005f));
+            var body = rig.AddRenderer("Body", Saved(bodyMesh, "Body"), "Hips");
+            var garment = Garment("Bikini", 0.0001f);
+            var session = TransferSession.Open(body, new[] { garment }, errors);
+            var g = session.Garments[0];
+
+            Assert.That(session.Transfer(null), Is.True);
+
+            var centre = new Vector3(0f, 0f, 0.005f);
+            Assert.That(g.Collider.Hit(g.Collider.Deformed(g.Results["Rise"].FinalWorld[0], 1f), centre, 0.05f, out var hit), Is.True);
+            Assert.That(SurfaceQuery.Signed(centre, hit), Is.LessThan(-0.00019f), "0.1 mm at rest, at least 0.2 mm over the lifted skin");
+        }
+
+        [Test]
+        public void Reach_TakesTheSkinUnderTheGarment_SoANubBetweenItsVerticesIsTicked()
+        {
+            var (body, garment) = Nub();
+
+            var session = TransferSession.Open(body, new[] { garment }, errors);
+
+            Assert.That(session.Garments[0].Reach["Nub"], Is.EqualTo(0.005f).Within(0.0002f));
+            Assert.That(session.Garments[0].Data.Entry("Nub")?.enabled, Is.True, "ticked at the first read");
+        }
     }
 }
