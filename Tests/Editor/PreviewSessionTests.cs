@@ -223,6 +223,26 @@ namespace Akiya82.BlendshapeTransfer.Tests
             return mesh;
         }
 
+        /// <summary>A shape frame with the normal change its positions make, as an imported shape with calculated normals has.</summary>
+        private static void AddShapeWithNormals(Mesh mesh, string name, System.Func<Vector3, Vector3> delta, float weight = 100f)
+        {
+            var moved = Object.Instantiate(mesh);
+            try
+            {
+                var vertices = mesh.vertices;
+                var normals = mesh.normals;
+                var dv = vertices.Select(delta).ToArray();
+                moved.vertices = vertices.Select((p, i) => p + dv[i]).ToArray();
+                moved.RecalculateNormals();
+                var dn = moved.normals.Select((m, i) => m - normals[i]).ToArray();
+                mesh.AddBlendShapeFrame(name, weight, dv, dn, null);
+            }
+            finally
+            {
+                Object.DestroyImmediate(moved);
+            }
+        }
+
         private static void AssertMatchesBake(SkinnedMeshRenderer renderer, PreviewMesh preview, string what)
         {
             var baked = new Mesh();
@@ -280,7 +300,7 @@ namespace Akiya82.BlendshapeTransfer.Tests
         public void Preview_MatchesTheSavedOutput_ForABodyOpenedAtAnotherWeight()
         {
             var bodyMesh = WithTangents(Grid(0f, 0.1f));
-            MeshFactory.AddShape(bodyMesh, "Bump", MeshFactory.Bump(0.01f, 0.04f));
+            AddShapeWithNormals(bodyMesh, "Bump", MeshFactory.Bump(0.01f, 0.04f));
             var body = rig.AddRenderer("Body", Saved(bodyMesh, "Body"), "Hips");
             body.SetBlendShapeWeight(0, 30f);
             var top = rig.AddRenderer("Top", Saved(WithTangents(Grid(0.004f, 0.05f)), "Top"), "Hips");
@@ -314,11 +334,13 @@ namespace Akiya82.BlendshapeTransfer.Tests
         public void Preview_MatchesTheSavedOutput_ForAnOverwrittenVendorShape()
         {
             var bodyMesh = WithTangents(Grid(0f, 0.1f));
-            MeshFactory.AddShape(bodyMesh, "Chest_Up", MeshFactory.Bump(0.01f, 0.04f));
+            AddShapeWithNormals(bodyMesh, "Chest_Up", MeshFactory.Bump(0.01f, 0.04f));
             var body = rig.AddRenderer("Body", Saved(bodyMesh, "Body"), "Hips");
             body.SetBlendShapeWeight(0, 50f);
             var bikiniMesh = WithTangents(Grid(0.008f, 0.05f));
-            MeshFactory.AddShape(bikiniMesh, "Chest_Up", _ => new Vector3(0f, 0f, 0.002f));
+            // a vendor shape that turns the normals too, kept in the output's base at the garment's weight
+            var count = bikiniMesh.vertexCount;
+            bikiniMesh.AddBlendShapeFrame("Chest_Up", 100f, Enumerable.Repeat(new Vector3(0f, 0f, 0.002f), count).ToArray(), Enumerable.Repeat(new Vector3(0.2f, 0f, 0f), count).ToArray(), null);
             var bikini = rig.AddRenderer("Bikini", Saved(bikiniMesh, "Bikini"), "Hips");
             bikini.SetBlendShapeWeight(0, 50f);
             var session = Read(body, bikini);

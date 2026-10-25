@@ -7,7 +7,7 @@ namespace Akiya82.BlendshapeTransfer
 {
     /// <summary>
     /// A renderer as the Edit preview draws it: a copy of its source mesh (submeshes, UVs, colours) with world positions, normals and
-    /// tangents, so it draws with the identity matrix; its blend shapes are stripped (Graphics.DrawMesh ignores the skin data).
+    /// tangents, so it draws with the identity matrix; its blend shapes are stripped: DrawMesh would not apply them, and they only cost memory. The vendor's own tangent deltas are not shown.
     /// </summary>
     internal sealed class PreviewMesh : IDisposable
     {
@@ -17,7 +17,8 @@ namespace Akiya82.BlendshapeTransfer
         private readonly SkinSpace skin;
         private readonly Vector3[] rest;
         private readonly Vector3[] restNormals;
-        private readonly Vector4[] restTangents;
+        /// <summary>The snapshot's normals in world space, set when an update has no normal offset.</summary>
+        private readonly Vector3[] worldRestNormals;
 
         /// <summary>The world positions last set.</summary>
         public Vector3[] Positions { get; private set; }
@@ -38,33 +39,43 @@ namespace Akiya82.BlendshapeTransfer
             if (restNormals.Length == rest.Length)
                 for (var s = 0; s < source.blendShapeCount; s++)
                     if (weights[s] != 0f) restNormals = DeltaOps.Add(restNormals, ShapeMath.DeltaAt(source, s, weights[s], normals: true), 1f);
-            restTangents = source.tangents;
+            Mesh.MarkDynamic();
+            if (restNormals.Length == rest.Length)
+            {
+                worldRestNormals = new Vector3[rest.Length];
+                for (var v = 0; v < rest.Length; v++) worldRestNormals[v] = skin.WorldVector(v, restNormals[v]).normalized;
+            }
+            var tangents = source.tangents;
+            if (tangents.Length == rest.Length)
+            {
+                // no shape moves the tangents in the preview: the skinned snapshot tangents, set once
+                var world = new Vector4[tangents.Length];
+                for (var v = 0; v < tangents.Length; v++)
+                {
+                    var t = skin.WorldVector(v, (Vector3)tangents[v]).normalized;
+                    world[v] = new Vector4(t.x, t.y, t.z, tangents[v].w);
+                }
+                Mesh.SetTangents(world);
+            }
             Update(null, null);
         }
 
-        /// <summary>World positions at rest + offset; normals (plus normalOffset, mesh space) and tangents through each vertex's skin matrix.</summary>
+        /// <summary>World positions at rest + offset; the snapshot's normals (plus normalOffset, mesh space) through each vertex's skin matrix.</summary>
         public void Update(Vector3[] offset, Vector3[] normalOffset)
         {
             var n = rest.Length;
             var positions = new Vector3[n];
             for (var v = 0; v < n; v++) positions[v] = offset == null ? rest[v] : rest[v] + offset[v];
             Mesh.SetVertices(positions);
-            if (restNormals.Length == n)
+            if (worldRestNormals != null)
             {
-                var normals = new Vector3[n];
-                for (var v = 0; v < n; v++) normals[v] = skin.WorldVector(v, normalOffset == null ? restNormals[v] : restNormals[v] + normalOffset[v]).normalized;
-                Mesh.SetNormals(normals);
-            }
-            if (restTangents.Length == n)
-            {
-                // no tangent deltas are written, so the game shows the skinned rest tangents as well
-                var tangents = new Vector4[n];
-                for (var v = 0; v < n; v++)
+                if (normalOffset == null) Mesh.SetNormals(worldRestNormals);
+                else
                 {
-                    var t = skin.WorldVector(v, (Vector3)restTangents[v]).normalized;
-                    tangents[v] = new Vector4(t.x, t.y, t.z, restTangents[v].w);
+                    var normals = new Vector3[n];
+                    for (var v = 0; v < n; v++) normals[v] = skin.WorldVector(v, restNormals[v] + normalOffset[v]).normalized;
+                    Mesh.SetNormals(normals);
                 }
-                Mesh.SetTangents(tangents);
             }
             Mesh.RecalculateBounds();
             Positions = positions;
@@ -76,6 +87,7 @@ namespace Akiya82.BlendshapeTransfer
         /// </summary>
         public int Draw(Camera camera, MaterialPropertyBlock block)
         {
+            if (Mesh.subMeshCount == 0) return 0;
             var materials = Renderer.sharedMaterials;
             // this overload refuses a proxy volume without the volume itself; the plain probes are the closest look
             var probes = Renderer.lightProbeUsage == LightProbeUsage.UseProxyVolume ? LightProbeUsage.BlendProbes : Renderer.lightProbeUsage;
@@ -103,6 +115,7 @@ namespace Akiya82.BlendshapeTransfer
         public bool Raycast(Ray ray, out float distance)
         {
             distance = float.MaxValue;
+            if (!Mesh.bounds.IntersectRay(ray)) return false;
             var p = Positions;
             for (var i = 0; i + 2 < triangles.Length; i += 3)
                 if (Intersect(ray, p[triangles[i]], p[triangles[i + 1]], p[triangles[i + 2]], out var t) && t < distance) distance = t;
