@@ -350,5 +350,22 @@ namespace Akiya82.BlendshapeTransfer.Tests
 
             AssertPreviewAt(session, "Chest_Up", 80f);
         }
+
+        [Test]
+        public void ClippingAt_ListsSkinThroughAGarmentThatDoesNotFollowIt()
+        {
+            var bodyMesh = MeshFactory.Grid(MeshFactory.Range(-0.02f, 0.02f, 81), MeshFactory.Range(-0.02f, 0.02f, 81), 0f);
+            MeshFactory.AddShape(bodyMesh, "Nub", MeshFactory.Bump(0.005f, 0.003f));
+            var body = rig.AddRenderer("Body", Saved(bodyMesh, "Body"), "Hips");
+            var fabric = rig.AddRenderer("Top", Saved(MeshFactory.Grid(MeshFactory.Range(-0.0175f, 0.0175f, 8), MeshFactory.Range(-0.0175f, 0.0175f, 8), 0.002f), "Top"), "Hips");
+            var session = Read(body, fabric);
+            session.Garments[0].Data.Entry("Nub").enabled = false;
+
+            var full = session.ClippingAt(0, "Nub", 100f);
+
+            Assert.That(full.Skin, Is.Empty, "no fabric vertex is inside the skin: the nub passes between them");
+            Assert.That(full.Through, Is.Not.Empty);
+            Assert.That(session.ClippingAt(0, "Nub", 0f).Through, Is.Empty);
+        }
     }
 }

@@ -875,10 +875,11 @@ namespace Akiya82.BlendshapeTransfer
         }
 
         /// <summary>
-        /// Garment k's vertices inside the skin and inside a lower garment it collides with, with the body shape at weight w: the check that
-        /// counts "still clipping" for the report, at any weight. Stale results must have been dropped first.
+        /// Garment k's vertices inside the skin and inside a lower garment it collides with, and the body vertices the shape pushes out
+        /// through it, with the body shape at weight w: the check that counts "still clipping" for the report, at any weight. Stale
+        /// results must have been dropped first.
         /// </summary>
-        internal (List<int> Skin, List<int> Layer) ClippingAt(int k, string name, float w)
+        internal (List<int> Skin, List<int> Layer, List<int> Through) ClippingAt(int k, string name, float w)
         {
             // ponytail: each garment's call moves the body and its lower garments again; build them once per shape and weight if Show clipping lags on release
             var g = Garments[k];
@@ -892,7 +893,8 @@ namespace Akiya82.BlendshapeTransfer
                 if (l.IsBody) skin.AddRange(inside);
                 else layer.UnionWith(inside);
             }
-            return (skin, layer.OrderBy(v => v).ToList());
+            var through = AntiClip.SkinOutside(Surface.Positions, BodyOffset(name, w), g.Collider, g.SkinCandidates, offset, band);
+            return (skin, layer.OrderBy(v => v).ToList(), through);
         }
 
         /// <summary>Whether garment k collides with the lower garment j: not when either lists the other as never worn with it.</summary>

@@ -30,7 +30,7 @@ namespace Akiya82.BlendshapeTransfer
         /// <summary>The fingerprints the dots were computed under: Not worn with or a reorder changes a garment's colliders without changing its result.</summary>
         private ulong[] dotsFor;
 
-        /// <summary>Per garment renderer, world points of its vertices inside the skin at the weight shown.</summary>
+        /// <summary>Per garment renderer, world points of its vertices inside the skin and of the skin through it, at the weight shown.</summary>
         public readonly Dictionary<Renderer, List<Vector3>> Skin = new Dictionary<Renderer, List<Vector3>>();
         /// <summary>Per garment renderer, world points of its vertices inside a lower layer it collides with at the weight shown.</summary>
         public readonly Dictionary<Renderer, List<Vector3>> Layer = new Dictionary<Renderer, List<Vector3>>();
@@ -114,12 +114,13 @@ namespace Akiya82.BlendshapeTransfer
                 return;
             }
             if (!compute) return;
+            var body = meshes[Session.Body].Positions;
             for (var k = 0; k < Session.Garments.Count; k++)
             {
                 var renderer = Session.Garments[k].Renderer;
                 var positions = meshes[renderer].Positions;
-                var (skin, layer) = Session.ClippingAt(k, name, w);
-                Skin[renderer] = skin.Select(v => positions[v]).ToList();
+                var (skin, layer, through) = Session.ClippingAt(k, name, w);
+                Skin[renderer] = skin.Select(v => positions[v]).Concat(through.Select(b => body[b])).ToList();
                 Layer[renderer] = layer.Select(v => positions[v]).ToList();
             }
             dotsFor = fingerprints;
