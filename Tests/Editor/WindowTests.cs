@@ -382,6 +382,7 @@ namespace Akiya82.BlendshapeTransfer.Tests
                 Localization.Override = code;
                 Paint(window);
                 Assert.That(window.Drawn, Is.SupersetOf(new[] { "edit", "settings", "bottom" }), $"{code}: drawn {string.Join(", ", window.Drawn)}");
+                Assert.That(window.Drawn.Intersect(new[] { "garments", "shapes", "result" }), Is.Empty, $"{code}: the Transfer tab's sections are not drawn on the Edit tab");
             }
             Assert.That(missing.Distinct(), Is.Empty, "keys looked up without English text");
         }

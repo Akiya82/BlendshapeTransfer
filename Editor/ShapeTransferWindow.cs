@@ -219,10 +219,11 @@ namespace Akiya82.BlendshapeTransfer
             {
                 var tabs = new[] { L.Content("tab.transfer"), L.Content("tab.edit") };
                 var width = tabs.Sum(t => EditorStyles.toolbarButton.CalcSize(t).x) + 8f;
-                var picked = GUILayout.Toolbar(tab, tabs, EditorStyles.toolbarButton, GUILayout.Width(width));
+                var picked = GUILayout.Toolbar(tab, tabs, EditorStyles.toolbarButton, GUI.ToolbarButtonSize.FitToContents, GUILayout.Width(width));
                 if (picked != tab)
                 {
                     tab = picked;
+                    GUIUtility.keyboardControl = 0;
                     GUIUtility.ExitGUI();
                 }
                 GUILayout.FlexibleSpace();

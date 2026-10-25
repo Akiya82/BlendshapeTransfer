@@ -39,14 +39,25 @@ namespace Akiya82.BlendshapeTransfer
             var wanted = tab == EditTab && session != null;
             if (preview != null && (!wanted || preview.Session != session)) EndPreview();
             if (!wanted || preview != null) return;
-            preview = new SessionPreview(session);
+            try
+            {
+                preview = new SessionPreview(session);
+            }
+            catch (Exception e)
+            {
+                // once, not on every Layout: the status line says why and the window goes back to the Transfer tab
+                Debug.LogException(e);
+                statusOverride = L.Format("status.previewFailed", e.Message);
+                tab = TransferTab;
+                return;
+            }
             eyes.Clear();
-            eyes[session.Body] = Shown(session.Body);
-            foreach (var g in session.Garments) eyes[g.Renderer] = Shown(g.Renderer);
+            eyes[session.Body] = InScene(session.Body);
+            foreach (var g in session.Garments) eyes[g.Renderer] = InScene(g.Renderer);
             preview.SetOthers(hideOthers ? OtherRenderers() : Enumerable.Empty<Renderer>());
             SceneView.RepaintAll();
 
-            static bool Shown(Renderer r) => r.enabled && r.gameObject.activeInHierarchy;
+            static bool InScene(Renderer r) => r.enabled && r.gameObject.activeInHierarchy;
         }
 
         private void EndPreview()
@@ -90,21 +101,26 @@ namespace Akiya82.BlendshapeTransfer
         private void DrawPreviewControls()
         {
             var names = PreviewShapes();
-            if (names.Count == 0)
-            {
-                EditorGUILayout.HelpBox(L.Get("edit.noShapes"), MessageType.Info);
-                return;
-            }
-            var labels = PreviewLabels(names).Select(l => new GUIContent(l)).ToArray();
+            if (names.Count == 0) EditorGUILayout.HelpBox(L.Get("edit.noShapes"), MessageType.Info);
             EditorGUI.BeginChangeCheck();
-            var index = EditorGUILayout.Popup(L.Content("edit.shape"), Math.Max(0, names.IndexOf(previewShape)), labels);
-            var weight = EditorGUILayout.Slider(L.Content("edit.weight"), previewWeight, 0f, 100f);
-            var clipping = EditorGUILayout.ToggleLeft(L.Content("edit.showClipping"), showClipping);
-            if (showClipping && preview != null) EditorGUILayout.LabelField(L.Format("edit.clippingCounts", preview.SkinCount, preview.LayerCount), EditorStyles.miniLabel);
+            var index = 0;
+            var weight = previewWeight;
+            var clipping = showClipping;
+            if (names.Count > 0)
+            {
+                var labels = PreviewLabels(names).Select(l => new GUIContent(l)).ToArray();
+                index = EditorGUILayout.Popup(L.Content("edit.shape"), Math.Max(0, names.IndexOf(previewShape)), labels);
+                weight = EditorGUILayout.Slider(L.Content("edit.weight"), previewWeight, 0f, 100f);
+                clipping = EditorGUILayout.ToggleLeft(L.Content("edit.showClipping"), showClipping);
+                if (showClipping && preview != null) EditorGUILayout.LabelField(L.Format("edit.clippingCounts", preview.SkinCount, preview.LayerCount), EditorStyles.miniLabel);
+            }
             var others = EditorGUILayout.ToggleLeft(L.Content("edit.hideOthers"), hideOthers);
             if (!EditorGUI.EndChangeCheck()) return;
-            previewShape = names[index];
-            previewWeight = weight;
+            if (names.Count > 0)
+            {
+                previewShape = names[index];
+                previewWeight = weight;
+            }
             if (others != hideOthers) HideOthers = others;
             SceneView.RepaintAll();
             if (clipping == showClipping) return;
@@ -138,7 +154,7 @@ namespace Akiya82.BlendshapeTransfer
             return names.Select(n => titles.TryGetValue(n, out var t) && t != null ? $"{Plain(t)}/{Plain(n)}" : Plain(n)).ToArray();
 
             // a slash would open a submenu of its own
-            static string Plain(string s) => s.Replace('/', '∕');
+            static string Plain(string s) => s.Replace('/', '\u2215');
         }
 
         private void DrawLayers()
@@ -163,6 +179,8 @@ namespace Akiya82.BlendshapeTransfer
                 if (GUILayout.Button(renderer.name, style) && garment && renderer != current)
                 {
                     current = (SkinnedMeshRenderer)renderer;
+                    // a text field being edited must not carry its text into the next garment's settings
+                    GUIUtility.keyboardControl = 0;
                     GUIUtility.ExitGUI();
                 }
             }
