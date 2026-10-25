@@ -21,6 +21,11 @@ namespace Akiya82.BlendshapeTransfer
         private double lastSceneMouse = double.MinValue;
         /// <summary>The Scene View shows the main stage, not prefab mode; tests replace it.</summary>
         internal static Func<bool> InMainStage = () => StageUtility.GetCurrentStage() is MainStage;
+        /// <summary>
+        /// The current garment changed outside the window's GUI: its next OnGUI drops the keyboard focus, so a text field being edited
+        /// does not carry its text into the next garment's settings.
+        /// </summary>
+        private bool clearFocus;
 
         internal SkinnedMeshRenderer CurrentGarment => current;
 
@@ -127,11 +132,14 @@ namespace Akiya82.BlendshapeTransfer
                 {
                     // the meshes follow a dragged weight slider; the compute waits until no control is held and no text field is edited
                     var idle = GUIUtility.hotControl == 0 && !EditorGUIUtility.editingTextField;
+                    var counts = (preview.SkinCount, preview.LayerCount);
                     preview.Show(previewShape, previewWeight, showClipping, idle, (info, progress) =>
                     {
                         progressShown = true;
                         EditorUtility.DisplayProgressBar(L.Get("window.title"), L.Format("progress.preview", info), progress);
                     });
+                    // the window shows the counts, and they change here, in the Scene View
+                    if (counts != (preview.SkinCount, preview.LayerCount)) Repaint();
                 }
                 return preview.Draw(camera, Visible);
             }
@@ -195,6 +203,7 @@ namespace Akiya82.BlendshapeTransfer
             var hit = preview.Pick(ray, Visible);
             if (hit == null) return false;
             current = hit;
+            clearFocus = true;
             Repaint();
             return true;
         }
@@ -206,6 +215,7 @@ namespace Akiya82.BlendshapeTransfer
             var picked = Selection.activeGameObject != null ? Selection.activeGameObject.GetComponent<SkinnedMeshRenderer>() : null;
             if (picked == null || session == null || session.Garments.All(g => g.Renderer != picked)) return;
             current = picked;
+            clearFocus = true;
             Repaint();
         }
 

@@ -10,10 +10,11 @@ using L = Akiya82.BlendshapeTransfer.Localization;
 namespace Akiya82.BlendshapeTransfer
 {
     /// <summary>
-    /// Tools/Blendshape Transfer: a header with the language, one page of numbered folding sections (avatar and garments, settings,
-    /// shapes, result) and a fixed bottom bar. IMGUI draws every event twice (layout, then input or repaint) and both passes must draw
-    /// the same controls, so a change that adds or removes controls ends the event with GUIUtility.ExitGUI, and folds are drawn from
-    /// their stored state (a new state shows from the next event).
+    /// Tools/Akiya82/Blendshape Transfer: a header with the tabs and the language; the Transfer tab, one page of numbered folding
+    /// sections (avatar and garments, settings, shapes, result); the Edit tab, a Scene View preview of the read session; and a fixed
+    /// bottom bar. IMGUI draws every event twice (layout, then input or repaint) and both passes must draw the same controls, so a
+    /// change that adds or removes controls ends the event with GUIUtility.ExitGUI, and folds are drawn from their stored state (a new
+    /// state shows from the next event).
     /// </summary>
     internal sealed partial class ShapeTransferWindow : EditorWindow
     {
@@ -54,7 +55,10 @@ namespace Akiya82.BlendshapeTransfer
         private TransferRun lastRun;
         private DateTime? transferredAt;
         private DateTime? savedAt;
-        /// <summary>A failure the last action reported (save or restore failed); cleared by the next read, Transfer, Save, drop, Undo or Redo.</summary>
+        /// <summary>
+        /// A failure the last action reported (save, restore or the preview failed); cleared by the next read, Transfer, Save, drop, Undo
+        /// or Redo.
+        /// </summary>
         private string statusOverride;
         /// <summary>Tests: every fold open, and the sections drawn in the last Repaint.</summary>
         internal bool AllOpen;
@@ -168,6 +172,11 @@ namespace Akiya82.BlendshapeTransfer
         private void OnGUI()
         {
             if (Event.current.type == EventType.Layout) Drawn.Clear();
+            if (clearFocus)
+            {
+                GUIUtility.keyboardControl = 0;
+                clearFocus = false;
+            }
             DrawHeader();
             if (EditorApplication.isPlayingOrWillChangePlaymode)
             {
