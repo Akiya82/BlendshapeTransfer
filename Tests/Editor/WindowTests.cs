@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using nadena.dev.ndmf.preview;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -366,6 +367,82 @@ namespace Akiya82.BlendshapeTransfer.Tests
                 Undo.ClearUndo(data);
                 Object.DestroyImmediate(data);
             }
+        }
+
+        [Test]
+        public void TheEditTabDrawsInEveryLanguage_WithNoKeyMissingInEnglish()
+        {
+            var missing = new List<string>();
+            Localization.Missing = missing.Add;
+            Localization.Override = "en";
+            OpenTransferred();
+            window.Tab = ShapeTransferWindow.EditTab;
+            foreach (var (code, _) in Localization.Languages)
+            {
+                Localization.Override = code;
+                Paint(window);
+                Assert.That(window.Drawn, Is.SupersetOf(new[] { "edit", "settings", "bottom" }), $"{code}: drawn {string.Join(", ", window.Drawn)}");
+            }
+            Assert.That(missing.Distinct(), Is.Empty, "keys looked up without English text");
+        }
+
+        [Test]
+        public void TheEditTabRunsThePreview_WhichEndsOnADrop_OnReadAgain_OnTheTransferTab_AndOnClose()
+        {
+            Localization.Override = "en";
+            OpenTransferred();
+            var depth = NDMFPreview.DisablePreviewDepth;
+            var bodyRenderer = window.Session.Body;
+            var top = window.Session.Garments[0].Renderer;
+            window.Tab = ShapeTransferWindow.EditTab;
+            Paint(window);
+            Assert.That(window.Preview, Is.Not.Null);
+            Assert.That(top.forceRenderingOff, Is.True);
+            Assert.That(NDMFPreview.DisablePreviewDepth, Is.EqualTo(depth + 1));
+
+            window.Read();
+            Assert.That(window.Preview, Is.Null, "a new read replaces the session");
+            Assert.That(top.forceRenderingOff, Is.False);
+            Paint(window);
+            Assert.That(window.Preview?.Session, Is.SameAs(window.Session), "and the preview starts on the new one");
+
+            window.SetUp(bodyRenderer, new[] { top });
+            Assert.That(window.Preview, Is.Null, "a drop");
+            Assert.That(top.forceRenderingOff, Is.False);
+            window.Read();
+            Paint(window);
+            Assert.That(window.Preview, Is.Not.Null);
+
+            window.Tab = ShapeTransferWindow.TransferTab;
+            Paint(window);
+            Assert.That(window.Preview, Is.Null);
+            Assert.That(top.forceRenderingOff, Is.False);
+
+            window.Tab = ShapeTransferWindow.EditTab;
+            Paint(window);
+            Assert.That(top.forceRenderingOff, Is.True);
+            window.Close();
+            window = null;
+            Assert.That(top.forceRenderingOff, Is.False, "closing the window writes the flags back");
+            Assert.That(NDMFPreview.DisablePreviewDepth, Is.EqualTo(depth));
+        }
+
+        [Test]
+        public void HideOtherMeshes_HidesTheAvatarsOtherRenderersOnly()
+        {
+            OpenTransferred();
+            var hair = new GameObject("Hair", typeof(MeshFilter), typeof(MeshRenderer)).GetComponent<MeshRenderer>();
+            hair.transform.SetParent(rig.Root.transform, false);
+            // in the test scene, outside the avatar
+            var prop = new GameObject("Prop", typeof(MeshFilter), typeof(MeshRenderer)).GetComponent<MeshRenderer>();
+            window.Tab = ShapeTransferWindow.EditTab;
+            Paint(window);
+
+            window.HideOthers = true;
+            Assert.That(hair.forceRenderingOff, Is.True);
+            Assert.That(prop.forceRenderingOff, Is.False);
+            window.HideOthers = false;
+            Assert.That(hair.forceRenderingOff, Is.False);
         }
     }
 }

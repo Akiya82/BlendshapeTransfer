@@ -55,13 +55,7 @@ namespace Akiya82.BlendshapeTransfer
             }
             if (session == null)
             {
-                if (readWanted) EditorGUILayout.HelpBox(L.Get("garments.reloadDropped"), MessageType.Info);
-                if (droppedBy != null) EditorGUILayout.HelpBox(L.Get(droppedBy), MessageType.Warning);
-                if (GUILayout.Button(L.Content(readWanted ? "garments.readAgain" : "garments.read")))
-                {
-                    Read();
-                    GUIUtility.ExitGUI();
-                }
+                DrawReadPrompt();
                 return;
             }
             using (new EditorGUILayout.HorizontalScope())
@@ -75,6 +69,18 @@ namespace Akiya82.BlendshapeTransfer
                 }
             }
             if (poseChanged) EditorGUILayout.HelpBox(L.Get("garments.poseChanged"), MessageType.Warning);
+        }
+
+        /// <summary>Why the meshes are not read (when the owner did not drop them) and the button that reads them; the Edit tab shows it too.</summary>
+        private void DrawReadPrompt()
+        {
+            if (readWanted) EditorGUILayout.HelpBox(L.Get("garments.reloadDropped"), MessageType.Info);
+            if (droppedBy != null) EditorGUILayout.HelpBox(L.Get(droppedBy), MessageType.Warning);
+            if (GUILayout.Button(L.Content(readWanted ? "garments.readAgain" : "garments.read")))
+            {
+                Read();
+                GUIUtility.ExitGUI();
+            }
         }
 
         private void DrawGarmentRow(Rect rect, int index, bool active, bool focused)

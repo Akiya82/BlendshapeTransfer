@@ -27,6 +27,8 @@ namespace Akiya82.BlendshapeTransfer
         [SerializeField] private bool readWanted;
         [SerializeField] private string search = "";
         [SerializeField] private bool reachOnly = true;
+        internal const int TransferTab = 0, EditTab = 1;
+        [SerializeField] private int tab;
         private TransferSession session;
         /// <summary>Per garment, from the last Layout event: whether its output is up to date.</summary>
         private bool[] fresh = new bool[0];
@@ -103,6 +105,8 @@ namespace Akiya82.BlendshapeTransfer
 
         private void OnDisable()
         {
+            // before a script reload too: the record of the hidden renderers lives in memory
+            EndPreview();
             EditorApplication.playModeStateChanged -= PlayModeChanged;
             EditorApplication.projectChanged -= ProjectChanged;
             ImportWatch.Imported -= Imported;
@@ -123,6 +127,7 @@ namespace Akiya82.BlendshapeTransfer
                 garments.AddRange(session.Garments.Select(g => g.Renderer));
             }
             Repaint();
+            SceneView.RepaintAll();
         }
 
         private void PlayModeChanged(PlayModeStateChange change)
@@ -169,19 +174,39 @@ namespace Akiya82.BlendshapeTransfer
                 EditorGUILayout.HelpBox(L.Get("window.exitPlayMode"), MessageType.Info);
                 return;
             }
-            if (session != null && (session.Body == null || session.Surface.Mesh == null || session.Garments.Any(g => g.Renderer == null || g.Snapshot.Source == null || g.Data == null)))
-                Drop("garments.gone");
-            if (Event.current.type == EventType.Layout) Refresh();
-            scroll = EditorGUILayout.BeginScrollView(scroll);
-            DrawGarmentsSection();
-            if (session != null && Current() != null)
+            // a released slider, a left text field or a changed setting lets the preview recompute: the Scene Views redraw after the
+            // window's input (asked before drawing, since a setting that adds controls ends the event with ExitGUI)
+            if (preview != null && Event.current.type != EventType.Layout && Event.current.type != EventType.Repaint) SceneView.RepaintAll();
+            if (session != null && SessionGone()) Drop("garments.gone");
+            if (Event.current.type == EventType.Layout)
             {
-                DrawSettingsSection();
-                DrawShapesSection();
+                Refresh();
+                SyncPreview();
             }
-            DrawResultSection();
+            scroll = EditorGUILayout.BeginScrollView(scroll);
+            if (tab == EditTab) DrawEditTab();
+            else
+            {
+                DrawGarmentsSection();
+                if (session != null && Current() != null)
+                {
+                    DrawSettingsSection();
+                    DrawShapesSection();
+                }
+                DrawResultSection();
+            }
             EditorGUILayout.EndScrollView();
             DrawBottomBar();
+        }
+
+        /// <summary>The body, a garment, a read mesh or a garment's data was destroyed since the read.</summary>
+        private bool SessionGone() =>
+            session.Body == null || session.Surface.Mesh == null || session.Garments.Any(g => g.Renderer == null || g.Snapshot.Source == null || g.Data == null);
+
+        internal int Tab
+        {
+            get => tab;
+            set => tab = value;
         }
 
         partial void DrawSettingsSection();
@@ -192,6 +217,14 @@ namespace Akiya82.BlendshapeTransfer
         {
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
+                var tabs = new[] { L.Content("tab.transfer"), L.Content("tab.edit") };
+                var width = tabs.Sum(t => EditorStyles.toolbarButton.CalcSize(t).x) + 8f;
+                var picked = GUILayout.Toolbar(tab, tabs, EditorStyles.toolbarButton, GUILayout.Width(width));
+                if (picked != tab)
+                {
+                    tab = picked;
+                    GUIUtility.ExitGUI();
+                }
                 GUILayout.FlexibleSpace();
                 var label = L.Content("header.language");
                 GUILayout.Label(label, EditorStyles.miniLabel, Width(label, EditorStyles.miniLabel));
@@ -316,6 +349,8 @@ namespace Akiya82.BlendshapeTransfer
 
         internal void Read()
         {
+            // the session is replaced: the preview ends and the next Layout starts it on the new one
+            EndPreview();
             droppedBy = null;
             lastRun = null;
             statusOverride = null;
@@ -353,6 +388,7 @@ namespace Akiya82.BlendshapeTransfer
         /// </summary>
         private void Drop(string why)
         {
+            EndPreview();
             foreach (var dead in carried.Keys.Where(r => r == null).ToList()) carried.Remove(dead);
             MirrorCarried();
             session = null;
