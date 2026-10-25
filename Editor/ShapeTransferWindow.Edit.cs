@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using L = Akiya82.BlendshapeTransfer.Localization;
 
@@ -16,6 +17,21 @@ namespace Akiya82.BlendshapeTransfer
         private SessionPreview preview;
         /// <summary>Per renderer of the preview, whether it is drawn; from the scene when the preview starts.</summary>
         private readonly Dictionary<Renderer, bool> eyes = new Dictionary<Renderer, bool>();
+        /// <summary>When a left mouse button last went down or up in a Scene View.</summary>
+        private double lastSceneMouse = double.MinValue;
+        /// <summary>The Scene View shows the main stage, not prefab mode; tests replace it.</summary>
+        internal static Func<bool> InMainStage = () => StageUtility.GetCurrentStage() is MainStage;
+
+        internal SkinnedMeshRenderer CurrentGarment => current;
+
+        internal void NoteSceneMouse(double now) => lastSceneMouse = now;
+
+        /// <summary>
+        /// The selection Unity makes from a Scene View click must not override the preview's pick: a selection change within half a
+        /// second of the last mouse-down or mouse-up there is left alone. Timed from the mouse-down too, so a mouse-up the view never
+        /// sees does not block the hierarchy for good.
+        /// </summary>
+        internal bool IgnoresSelection(double now) => now - lastSceneMouse < 0.5;
 
         internal SessionPreview Preview => preview;
 
@@ -55,6 +71,9 @@ namespace Akiya82.BlendshapeTransfer
             eyes[session.Body] = InScene(session.Body);
             foreach (var g in session.Garments) eyes[g.Renderer] = InScene(g.Renderer);
             preview.SetOthers(hideOthers ? OtherRenderers() : Enumerable.Empty<Renderer>());
+            SceneView.beforeSceneGui += BeforeSceneGui;
+            SceneView.duringSceneGui += DuringSceneGui;
+            Selection.selectionChanged += SelectionChanged;
             SceneView.RepaintAll();
 
             static bool InScene(Renderer r) => r.enabled && r.gameObject.activeInHierarchy;
@@ -63,6 +82,9 @@ namespace Akiya82.BlendshapeTransfer
         private void EndPreview()
         {
             if (preview == null) return;
+            SceneView.beforeSceneGui -= BeforeSceneGui;
+            SceneView.duringSceneGui -= DuringSceneGui;
+            Selection.selectionChanged -= SelectionChanged;
             preview.Dispose();
             preview = null;
             SceneView.RepaintAll();
@@ -73,6 +95,147 @@ namespace Akiya82.BlendshapeTransfer
             session.Avatar.GetComponentsInChildren<Renderer>(true).Where(r => r != session.Body && session.Garments.All(g => g.Renderer != r)).ToList();
 
         private bool Visible(Renderer r) => eyes.TryGetValue(r, out var shown) && shown;
+
+        /// <summary>Before the Scene View camera renders: the preview meshes for this camera.</summary>
+        private void BeforeSceneGui(SceneView view)
+        {
+            if (Event.current.type == EventType.Repaint) DrawPreview(view.camera);
+        }
+
+        /// <summary>
+        /// One Scene View repaint of the preview: the checks the window's Layout would make (the window may be hidden behind a tab), the
+        /// shown shape brought up to date unless a control is held or a text field is being edited, then the draw; the draw calls made.
+        /// </summary>
+        internal int DrawPreview(Camera camera)
+        {
+            if (preview == null || !InMainStage() || SceneCheck()) return 0;
+            preview.Reassert();
+            var names = PreviewShapes();
+            if (!names.Contains(previewShape))
+            {
+                previewShape = names.FirstOrDefault();
+                Repaint();
+            }
+            if (previewShape != null)
+            {
+                // the meshes follow a dragged weight slider; the compute waits until no control is held and no text field is edited
+                var idle = GUIUtility.hotControl == 0 && !EditorGUIUtility.editingTextField;
+                var progressShown = false;
+                try
+                {
+                    preview.Show(previewShape, previewWeight, showClipping, idle, (info, progress) =>
+                    {
+                        progressShown = true;
+                        EditorUtility.DisplayProgressBar(L.Get("window.title"), L.Format("progress.preview", info), progress);
+                    });
+                }
+                catch (Exception e)
+                {
+                    // once, not on every repaint: the preview ends and the status line says why
+                    Debug.LogException(e);
+                    statusOverride = L.Format("status.previewFailed", e.Message);
+                    tab = TransferTab;
+                    EndPreview();
+                    Repaint();
+                    return 0;
+                }
+                finally
+                {
+                    // another tool's progress bar is not ours to clear
+                    if (progressShown) EditorUtility.ClearProgressBar();
+                }
+            }
+            return preview.Draw(camera, Visible);
+        }
+
+        /// <summary>
+        /// The window's Layout checks, made from the Scene View: a destroyed body, garment, read mesh or data drops the read meshes and
+        /// with them the preview; the pose check feeds the label. True when there is no session left.
+        /// </summary>
+        internal bool SceneCheck()
+        {
+            if (session == null) return true;
+            if (SessionGone())
+            {
+                Drop("garments.gone");
+                Repaint();
+                return true;
+            }
+            poseChanged = session.PoseChanged();
+            return false;
+        }
+
+        private void DuringSceneGui(SceneView view)
+        {
+            if (preview == null || !InMainStage()) return;
+            var e = Event.current;
+            if (e.type == EventType.MouseDown && e.button == 0 && !e.alt)
+            {
+                NoteSceneMouse(EditorApplication.timeSinceStartup);
+                // not used: Unity's own selection still happens
+                ScenePick(HandleUtility.GUIPointToWorldRay(e.mousePosition));
+            }
+            // rawType: Unity's picking may have used the mouse-up already
+            else if (e.rawType == EventType.MouseUp && e.button == 0) NoteSceneMouse(EditorApplication.timeSinceStartup);
+            if (e.type == EventType.Repaint) DrawDots();
+            DrawSceneLabel(view);
+        }
+
+        /// <summary>A Scene View click: the nearest visible garment under it becomes current; true when one did.</summary>
+        internal bool ScenePick(Ray ray)
+        {
+            if (preview == null || !InMainStage()) return false;
+            var hit = preview.Pick(ray, Visible);
+            if (hit == null) return false;
+            current = hit;
+            Repaint();
+            return true;
+        }
+
+        /// <summary>A session garment selected in the hierarchy becomes current, except the selection Unity makes from a Scene View click.</summary>
+        private void SelectionChanged()
+        {
+            if (IgnoresSelection(EditorApplication.timeSinceStartup)) return;
+            var picked = Selection.activeGameObject != null ? Selection.activeGameObject.GetComponent<SkinnedMeshRenderer>() : null;
+            if (picked == null || session == null || session.Garments.All(g => g.Renderer != picked)) return;
+            current = picked;
+            Repaint();
+        }
+
+        private void DrawDots()
+        {
+            if (!showClipping) return;
+            foreach (var g in session.Garments)
+            {
+                if (!Visible(g.Renderer)) continue;
+                if (preview.Skin.TryGetValue(g.Renderer, out var skin)) Dots(skin, Color.red);
+                if (preview.Layer.TryGetValue(g.Renderer, out var layer)) Dots(layer, new Color(1f, 0.55f, 0f));
+            }
+
+            static void Dots(List<Vector3> points, Color color)
+            {
+                Handles.color = color;
+                foreach (var p in points) Handles.DotHandleCap(0, p, Quaternion.identity, HandleUtility.GetHandleSize(p) * 0.025f, EventType.Repaint);
+            }
+        }
+
+        private void DrawSceneLabel(SceneView view)
+        {
+            Handles.BeginGUI();
+            var height = view.camera.pixelRect.height / EditorGUIUtility.pixelsPerPoint;
+            GUILayout.BeginArea(new Rect(8f, height - 78f, 360f, 70f), EditorStyles.helpBox);
+            GUILayout.Label(L.Format("edit.label", previewShape ?? "—", previewWeight), EditorStyles.boldLabel);
+            // always drawn: the pose check runs in the Repaint pass, and Layout and Repaint must draw the same controls
+            GUILayout.Label(poseChanged ? L.Get("edit.poseChangedShort") : "", EditorStyles.miniLabel);
+            if (GUILayout.Button(L.Content("edit.endPreview"), GUILayout.Width(140f)))
+            {
+                tab = TransferTab;
+                EndPreview();
+                Repaint();
+            }
+            GUILayout.EndArea();
+            Handles.EndGUI();
+        }
 
         private void DrawEditTab()
         {

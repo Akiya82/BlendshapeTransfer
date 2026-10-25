@@ -445,5 +445,71 @@ namespace Akiya82.BlendshapeTransfer.Tests
             window.HideOthers = false;
             Assert.That(hair.forceRenderingOff, Is.False);
         }
+
+        [Test]
+        public void ADestroyedGarment_EndsThePreviewFromTheSceneView()
+        {
+            Localization.Override = "en";
+            OpenTransferred();
+            var bodyRenderer = window.Session.Body;
+            window.Tab = ShapeTransferWindow.EditTab;
+            Paint(window);
+            Assert.That(bodyRenderer.forceRenderingOff, Is.True);
+            Object.DestroyImmediate(window.Session.Garments[0].Renderer.gameObject);
+
+            Assert.That(window.SceneCheck(), Is.True, "the window itself may be hidden behind a tab");
+
+            Assert.That(window.Preview, Is.Null);
+            Assert.That(window.Session, Is.Null);
+            Assert.That(bodyRenderer.forceRenderingOff, Is.False);
+        }
+
+        [Test]
+        public void OutsideTheMainStage_TheSceneViewDrawsAndPicksNothing()
+        {
+            Localization.Override = "en";
+            OpenTransferred();
+            var top = window.Session.Garments[0].Renderer;
+            var material = new Material(Shader.Find("Hidden/Internal-Colored"));
+            var mainStage = ShapeTransferWindow.InMainStage;
+            try
+            {
+                // the owner's editor may be in prefab mode while the tests run
+                ShapeTransferWindow.InMainStage = () => true;
+                top.sharedMaterial = material;
+                var camera = new GameObject("Camera").AddComponent<Camera>();
+                window.Tab = ShapeTransferWindow.EditTab;
+                Paint(window);
+                var down = new Ray(new Vector3(0.01f, 0.01f, 1f), Vector3.back);
+                Assert.That(window.DrawPreview(camera), Is.GreaterThan(0));
+                Assert.That(window.ScenePick(down), Is.True);
+                Assert.That(window.CurrentGarment, Is.SameAs(top));
+                Assert.That(window.ScenePick(new Ray(new Vector3(0.5f, 0f, 1f), Vector3.back)), Is.False, "a miss");
+                Assert.That(window.CurrentGarment, Is.SameAs(top), "keeps the current garment");
+
+                ShapeTransferWindow.InMainStage = () => false;
+
+                Assert.That(window.DrawPreview(camera), Is.EqualTo(0));
+                Assert.That(window.ScenePick(down), Is.False);
+            }
+            finally
+            {
+                ShapeTransferWindow.InMainStage = mainStage;
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
+        public void TheSelectionAfterASceneViewClick_IsLeftAloneForHalfASecond_EvenWithoutAMouseUp()
+        {
+            window = Unpainted();
+            window.NoteSceneMouse(10.0);
+            Assert.That(window.IgnoresSelection(10.3), Is.True);
+            Assert.That(window.IgnoresSelection(10.6), Is.False, "a mouse-up the Scene View never saw does not block the hierarchy for good");
+
+            window.NoteSceneMouse(20.0);
+            window.NoteSceneMouse(22.0);
+            Assert.That(window.IgnoresSelection(22.3), Is.True, "after a long press, timed from its mouse-up");
+        }
     }
 }
