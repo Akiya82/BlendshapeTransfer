@@ -211,5 +211,122 @@ namespace Akiya82.BlendshapeTransfer.Tests
             Assert.That(session.ClippingAt(1, "Bump", 50f).Layer, Is.EquivalentTo(session.Garments[1].LayerCandidates[lower].Vertices));
             Assert.That(session.ClippingAt(1, "Bump", 100f).Skin, Is.Not.Empty, "the skin rises 10 mm at 100, through the outer sheet at 6 mm");
         }
+
+        private static Mesh Grid(float z, float half) =>
+            MeshFactory.Grid(MeshFactory.Range(-half, half, 21), MeshFactory.Range(-half, half, 21), z);
+
+        /// <summary>UVs from x and y, then tangents from them, so the preview's tangents are checked too.</summary>
+        private static Mesh WithTangents(Mesh mesh)
+        {
+            mesh.uv = mesh.vertices.Select(p => new Vector2(p.x, p.y)).ToArray();
+            mesh.RecalculateTangents();
+            return mesh;
+        }
+
+        private static void AssertMatchesBake(SkinnedMeshRenderer renderer, PreviewMesh preview, string what)
+        {
+            var baked = new Mesh();
+            try
+            {
+                renderer.BakeMesh(baked, true);
+                var m = renderer.transform.localToWorldMatrix;
+                var vertices = baked.vertices;
+                var normals = baked.normals;
+                var tangents = baked.tangents;
+                var pv = preview.Mesh.vertices;
+                var pn = preview.Mesh.normals;
+                var pt = preview.Mesh.tangents;
+                Assert.That(pv.Length, Is.EqualTo(vertices.Length), what);
+                for (var v = 0; v < vertices.Length; v++)
+                {
+                    Assert.That((m.MultiplyPoint3x4(vertices[v]) - pv[v]).magnitude, Is.LessThan(1e-5f), $"{what}: position {v}");
+                    Assert.That((m.MultiplyVector(normals[v]).normalized - pn[v]).magnitude, Is.LessThan(1e-5f), $"{what}: normal {v}");
+                    Assert.That((m.MultiplyVector(tangents[v]).normalized - (Vector3)pt[v]).magnitude, Is.LessThan(1e-5f), $"{what}: tangent {v}");
+                    Assert.That(pt[v].w, Is.EqualTo(tangents[v].w), $"{what}: tangent sign {v}");
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(baked);
+            }
+        }
+
+        /// <summary>
+        /// Sets the shape to w on the body and on every saved garment (MA Sync does that in game), then compares each preview mesh at
+        /// w with the renderer's own skinning.
+        /// </summary>
+        private static void AssertPreviewAt(TransferSession session, string shape, float w)
+        {
+            var body = session.Body;
+            body.SetBlendShapeWeight(body.sharedMesh.GetBlendShapeIndex(shape), w);
+            using (var preview = new PreviewMesh(body, session.Surface.Mesh, session.Surface.Skin, session.Surface.Positions, session.Surface.Weights))
+            {
+                preview.Update(session.BodyOffset(shape, w), session.BodyNormalOffset(shape, w));
+                AssertMatchesBake(body, preview, $"Body at {w}");
+            }
+            foreach (var g in session.Garments)
+            {
+                var index = g.Renderer.sharedMesh.GetBlendShapeIndex(shape);
+                if (index >= 0) g.Renderer.SetBlendShapeWeight(index, w);
+                using (var preview = new PreviewMesh(g.Renderer, g.Snapshot.Source, g.Snapshot.Skin, g.Snapshot.Positions, g.Snapshot.Weights))
+                {
+                    preview.Update(session.GarmentOffset(g, shape, w), session.GarmentNormalOffset(g, shape, w));
+                    AssertMatchesBake(g.Renderer, preview, $"{g.Renderer.name} at {w}");
+                }
+            }
+        }
+
+        [Test]
+        public void Preview_MatchesTheSavedOutput_ForABodyOpenedAtAnotherWeight()
+        {
+            var bodyMesh = WithTangents(Grid(0f, 0.1f));
+            MeshFactory.AddShape(bodyMesh, "Bump", MeshFactory.Bump(0.01f, 0.04f));
+            var body = rig.AddRenderer("Body", Saved(bodyMesh, "Body"), "Hips");
+            body.SetBlendShapeWeight(0, 30f);
+            var top = rig.AddRenderer("Top", Saved(WithTangents(Grid(0.004f, 0.05f)), "Top"), "Hips");
+            // a placed, turned avatar: world space no longer equals mesh space
+            rig.Root.transform.SetPositionAndRotation(new Vector3(0.3f, 1f, -0.2f), Quaternion.Euler(10f, 40f, 0f));
+            var session = Read(body, top);
+            Assert.That(session.Transfer(null), Is.True);
+            session.Save(false);
+
+            AssertPreviewAt(session, "Bump", 70f);
+        }
+
+        [Test]
+        public void Preview_MatchesTheSavedOutput_ForATwoFrameShape()
+        {
+            var bodyMesh = WithTangents(Grid(0f, 0.1f));
+            var bump = MeshFactory.Bump(0.01f, 0.04f);
+            MeshFactory.AddShape(bodyMesh, "Two", bump, 50f);
+            MeshFactory.AddShape(bodyMesh, "Two", p => bump(p) * 0.4f, 100f);
+            var body = rig.AddRenderer("Body", Saved(bodyMesh, "Body"), "Hips");
+            var top = rig.AddRenderer("Top", Saved(WithTangents(Grid(0.004f, 0.05f)), "Top"), "Hips");
+            var session = Read(body, top);
+            Assert.That(session.Transfer(null), Is.True);
+            session.Save(false);
+
+            AssertPreviewAt(session, "Two", 25f);
+            AssertPreviewAt(session, "Two", 75f);
+        }
+
+        [Test]
+        public void Preview_MatchesTheSavedOutput_ForAnOverwrittenVendorShape()
+        {
+            var bodyMesh = WithTangents(Grid(0f, 0.1f));
+            MeshFactory.AddShape(bodyMesh, "Chest_Up", MeshFactory.Bump(0.01f, 0.04f));
+            var body = rig.AddRenderer("Body", Saved(bodyMesh, "Body"), "Hips");
+            body.SetBlendShapeWeight(0, 50f);
+            var bikiniMesh = WithTangents(Grid(0.008f, 0.05f));
+            MeshFactory.AddShape(bikiniMesh, "Chest_Up", _ => new Vector3(0f, 0f, 0.002f));
+            var bikini = rig.AddRenderer("Bikini", Saved(bikiniMesh, "Bikini"), "Hips");
+            bikini.SetBlendShapeWeight(0, 50f);
+            var session = Read(body, bikini);
+            session.Garments[0].Data.Entry("Chest_Up").overwrite = true;
+            Assert.That(session.Transfer(null), Is.True);
+            session.Save(false);
+
+            AssertPreviewAt(session, "Chest_Up", 80f);
+        }
     }
 }
