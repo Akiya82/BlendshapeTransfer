@@ -147,5 +147,35 @@ namespace Akiya82.BlendshapeTransfer.Tests
                 Object.DestroyImmediate(material);
             }
         }
+
+        [Test]
+        public void Show_TheDotsWaitForACompute_AndReassertHidesAgain()
+        {
+            var body = Body();
+            var top = Garment("Top", 0.004f);
+            var session = Read(body, top);
+            // a garment that does not write the shape stays put while the skin rises 10 mm through it at 100
+            session.Garments[0].Data.Entry("Bump").enabled = false;
+            using (var preview = new SessionPreview(session))
+            {
+                preview.Show("Bump", 0f, true, true);
+                Assert.That(preview.SkinCount, Is.EqualTo(0), "at weight 0 nothing clips");
+                preview.Show("Bump", 100f, true, false);
+                Assert.That(preview.SkinCount, Is.EqualTo(0), "the dots wait while a control is held");
+                preview.Show("Bump", 100f, true, true);
+                Assert.That(preview.SkinCount, Is.GreaterThan(0));
+                preview.Show("Bump", 50f, true, false);
+                Assert.That(preview.SkinCount, Is.EqualTo(0), "none rather than another weight's");
+                preview.Show("Bump", 100f, false, true);
+                Assert.That(preview.SkinCount, Is.EqualTo(0), "clipping off");
+
+                body.forceRenderingOff = false;
+                preview.Reassert();
+                Assert.That(body.forceRenderingOff, Is.True);
+                preview.SetOthers(new Renderer[] { top });
+                preview.SetOthers(new Renderer[0]);
+                Assert.That(top.forceRenderingOff, Is.True, "a session renderer stays hidden");
+            }
+        }
     }
 }

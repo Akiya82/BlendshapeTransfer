@@ -31,33 +31,41 @@ namespace Akiya82.BlendshapeTransfer
             this.skin = skin;
             this.rest = rest;
             Mesh = Object.Instantiate(source);
-            Mesh.name = source.name + " (preview)";
-            Mesh.hideFlags = HideFlags.HideAndDontSave;
-            Mesh.ClearBlendShapes();
-            triangles = source.triangles;
-            restNormals = source.normals;
-            if (restNormals.Length == rest.Length)
-                for (var s = 0; s < source.blendShapeCount; s++)
-                    if (weights[s] != 0f) restNormals = DeltaOps.Add(restNormals, ShapeMath.DeltaAt(source, s, weights[s], normals: true), 1f);
-            Mesh.MarkDynamic();
-            if (restNormals.Length == rest.Length)
+            try
             {
-                worldRestNormals = new Vector3[rest.Length];
-                for (var v = 0; v < rest.Length; v++) worldRestNormals[v] = skin.WorldVector(v, restNormals[v]).normalized;
-            }
-            var tangents = source.tangents;
-            if (tangents.Length == rest.Length)
-            {
-                // no shape moves the tangents in the preview: the skinned snapshot tangents, set once
-                var world = new Vector4[tangents.Length];
-                for (var v = 0; v < tangents.Length; v++)
+                Mesh.name = source.name + " (preview)";
+                Mesh.hideFlags = HideFlags.HideAndDontSave;
+                Mesh.ClearBlendShapes();
+                triangles = source.triangles;
+                restNormals = source.normals;
+                if (restNormals.Length == rest.Length)
+                    for (var s = 0; s < source.blendShapeCount; s++)
+                        if (weights[s] != 0f) restNormals = DeltaOps.Add(restNormals, ShapeMath.DeltaAt(source, s, weights[s], normals: true), 1f);
+                Mesh.MarkDynamic();
+                if (restNormals.Length == rest.Length)
                 {
-                    var t = skin.WorldVector(v, (Vector3)tangents[v]).normalized;
-                    world[v] = new Vector4(t.x, t.y, t.z, tangents[v].w);
+                    worldRestNormals = new Vector3[rest.Length];
+                    for (var v = 0; v < rest.Length; v++) worldRestNormals[v] = skin.WorldVector(v, restNormals[v]).normalized;
                 }
-                Mesh.SetTangents(world);
+                var tangents = source.tangents;
+                if (tangents.Length == rest.Length)
+                {
+                    // no shape moves the tangents in the preview: the skinned snapshot tangents, set once
+                    var world = new Vector4[tangents.Length];
+                    for (var v = 0; v < tangents.Length; v++)
+                    {
+                        var t = skin.WorldVector(v, (Vector3)tangents[v]).normalized;
+                        world[v] = new Vector4(t.x, t.y, t.z, tangents[v].w);
+                    }
+                    Mesh.SetTangents(world);
+                }
+                Update(null, null);
             }
-            Update(null, null);
+            catch
+            {
+                Object.DestroyImmediate(Mesh);
+                throw;
+            }
         }
 
         /// <summary>World positions at rest + offset; the snapshot's normals (plus normalOffset, mesh space) through each vertex's skin matrix.</summary>
