@@ -50,9 +50,9 @@ namespace Akiya82.BlendshapeTransfer
         }
 
         /// <summary>
-        /// The collider moved by scale × delta (ponytail: rebuilds a grid per call, ~20 ms on 25k vertices, so a frame with a hand edit
-        /// builds the full-weight collider twice, for anti-clip and its check; cache per delta if live recompute is too slow, seed from
-        /// rest triangles if Transfer is).
+        /// The collider moved by scale × delta (ponytail: rebuilds a grid per call, ~20 ms on 25k vertices; the skin side rebuilds the
+        /// garment's once per lift round, up to Rounds + 1 a frame, and a frame with a hand edit builds the full-weight colliders again
+        /// for its check; cache per delta if live recompute is too slow, seed from rest triangles if Transfer is).
         /// </summary>
         public SurfaceQuery Deformed(Vector3[] delta, float scale)
         {
@@ -122,6 +122,12 @@ namespace Akiya82.BlendshapeTransfer
 
         public SkinCandidates(Vector3[] bodyRest, ColliderSurface garment)
         {
+            if (garment.Rest.Length == 0)
+            {
+                Vertices = new int[0];
+                RestGap = new float[0];
+                return;
+            }
             var bounds = new Bounds(garment.Rest[0], Vector3.zero);
             foreach (var p in garment.Rest) bounds.Encapsulate(p);
             bounds.Expand(2f * Reach);
@@ -158,7 +164,8 @@ namespace Akiya82.BlendshapeTransfer
         public const float MinBand = 0.02f;
         /// <summary>
         /// The fabric is kept at least this far over skin a shape moves, also where it touched the skin at rest, so coincident fabric
-        /// does not show the skin through it.
+        /// does not show the skin through it. The floor is capped by how far the shape moved that skin vertex, so float noise in a
+        /// vendor shape does not lift fabric touching the skin.
         /// </summary>
         public const float SkinFloor = 0.0002f;
         private const float QueryMargin = 0.05f;
@@ -183,7 +190,9 @@ namespace Akiya82.BlendshapeTransfer
         /// to the welded neighbours and a rigid island moves by its deepest push. delta (world) is changed in place. Returns each
         /// layer's candidates still inside it at the result, as <see cref="CountInside"/> counts them.
         /// </summary>
-        public static int[] Apply(Topology topology, Vector3[] rest, Vector3[] delta, IReadOnlyList<Layer> layers, float band, float clearance, HashSet<int> rigidIslands, ref ClipStats stats)
+        /// <param name="pushed">The vertices already counted in stats.Pushed; shared with <see cref="LiftOverSkin"/> so a vertex both move counts once.</param>
+        public static int[] Apply(Topology topology, Vector3[] rest, Vector3[] delta, IReadOnlyList<Layer> layers, float band, float clearance, HashSet<int> rigidIslands, ref ClipStats stats,
+            bool[] pushed = null)
         {
             var reach = new float[layers.Count];
             var active = new bool[layers.Count][];
@@ -203,7 +212,7 @@ namespace Akiya82.BlendshapeTransfer
                 distance[i] = new float[signed[i].Length];
             }
             var push = new Vector3[delta.Length];
-            var pushed = new bool[delta.Length];
+            pushed ??= new bool[delta.Length];
             // the collider stays put during the call, so a candidate that did not move since its last query keeps its answer
             var moved = new bool[delta.Length];
             // the round after the last one only counts what is left
@@ -284,33 +293,39 @@ namespace Akiya82.BlendshapeTransfer
 
         /// <summary>
         /// The skin side of anti-clip. Skin the shape moves (skin candidates within band, body delta not zero) that ends closer under
-        /// the deformed garment than max(min(gap, clearance), SkinFloor), or outside it, lifts the hit triangle along its face normal by
-        /// the least change of its corners. Pushes are feathered and a rigid island moves by its deepest push, as in Apply, for at most
-        /// Rounds rounds. It catches skin passing between garment vertices, which Apply cannot see. delta (world) is changed in place.
+        /// the deformed garment than max(min(gap, clearance), min(SkinFloor, how far the shape moved it)), or outside it, lifts the hit
+        /// triangle along its face normal by the least change of its corners. Pushes are feathered and a rigid island moves by its
+        /// deepest push, as in Apply, for at most Rounds rounds. It catches skin passing between garment vertices, which Apply cannot
+        /// see. delta (world) is changed in place. Returns the skin still outside the garment at the result.
         /// </summary>
-        public static void LiftOverSkin(Topology topology, Vector3[] delta, ColliderSurface garment, SkinCandidates skin,
-            Vector3[] bodyRest, Vector3[] bodyDelta, float band, float clearance, HashSet<int> rigidIslands, ref ClipStats stats)
+        /// <param name="pushed">The vertices already counted in stats.Pushed, as <see cref="Apply"/> marks them.</param>
+        public static int LiftOverSkin(Topology topology, Vector3[] delta, ColliderSurface garment, SkinCandidates skin,
+            Vector3[] bodyRest, Vector3[] bodyDelta, float band, float clearance, HashSet<int> rigidIslands, bool[] pushed, ref ClipStats stats)
         {
-            if (bodyDelta == null) return;
+            if (bodyDelta == null) return 0;
             var active = new List<int>();
             for (var k = 0; k < skin.Vertices.Length; k++)
                 if (skin.RestGap[k] <= band && !DeltaOps.IsZero(bodyDelta[skin.Vertices[k]])) active.Add(k);
-            if (active.Count == 0) return;
+            if (active.Count == 0) return 0;
             var t = topology.Triangles;
             var push = new Vector3[delta.Length];
+            // the round after the last one only counts what is left
             for (var round = 0; ; round++)
             {
                 Array.Clear(push, 0, push.Length);
                 var query = garment.Deformed(delta, 1f);
                 var reach = band + MaxMagnitude(bodyDelta) + MaxMagnitude(delta) + QueryMargin;
                 var any = false;
+                var outside = 0;
                 foreach (var k in active)
                 {
                     var b = skin.Vertices[k];
                     var p = bodyRest[b] + bodyDelta[b];
                     if (!garment.Hit(query, p, reach, out var hit)) continue;
+                    var signed = SurfaceQuery.Signed(p, hit);
+                    if (signed > 0f) outside++;
                     // the skin point is under the sheet when signed is negative: lift what is missing to the target gap
-                    var lift = SurfaceQuery.Signed(p, hit) + Mathf.Max(Mathf.Min(skin.RestGap[k], clearance), SkinFloor);
+                    var lift = signed + Mathf.Max(Mathf.Min(skin.RestGap[k], clearance), Mathf.Min(SkinFloor, bodyDelta[b].magnitude));
                     if (lift <= 0f) continue;
                     var bary = hit.Bary;
                     var squares = bary.x * bary.x + bary.y * bary.y + bary.z * bary.z;
@@ -322,12 +337,13 @@ namespace Akiya82.BlendshapeTransfer
                     }
                     any = true;
                 }
-                if (!any) break;
+                // with nothing to lift every hit is under the sheet, so outside is 0
+                if (!any) return outside;
                 if (round == Rounds)
                 {
                     for (var v = 0; v < push.Length; v++)
                         if (push[v] != Vector3.zero) stats.Unresolved++;
-                    break;
+                    return outside;
                 }
                 Feather(topology, push);
                 foreach (var island in rigidIslands)
@@ -341,6 +357,7 @@ namespace Akiya82.BlendshapeTransfer
                 {
                     if (push[v] == Vector3.zero) continue;
                     delta[v] += push[v];
+                    if (!pushed[v]) { pushed[v] = true; stats.Pushed++; }
                     stats.MaxPush = Mathf.Max(stats.MaxPush, push[v].magnitude);
                 }
             }

@@ -23,7 +23,11 @@ namespace Akiya82.BlendshapeTransfer
         /// Steps 1–6 for one body shape frame: sample, weld, smooth, falloff, rigid islands, anti-clip; then the garment's own layers
         /// keep their order and the attached islands ride on the cloth where it ended. World space.
         /// </summary>
-        /// <param name="inside">When anti-clip runs, overwritten with its count of candidates still inside each layer at the result.</param>
+        /// <param name="inside">
+        /// When anti-clip runs, overwritten with its count of candidates still inside each layer at the result; the body layer's count
+        /// also holds the skin the skin side left outside the garment. The vertex counts are taken before the skin side, which only
+        /// lifts fabric away from the skin.
+        /// </param>
         /// <param name="self">The garment's own collider; with skin, the skin under it is kept under it too.</param>
         public static Vector3[] AutoWorld(Correspondence c, BodySurface body, GarmentSnapshot garment, Vector3[] bodyDelta,
             HashSet<int> rigidIslands, IReadOnlyList<AntiClip.Layer> layers, float band, ref ClipStats stats, int[] inside = null, Attachments attached = null,
@@ -34,12 +38,20 @@ namespace Akiya82.BlendshapeTransfer
             AntiClip.Layer bodyLayer = null;
             if (c.Settings.antiClip && layers != null)
             {
-                var counts = AntiClip.Apply(garment.Topology, garment.Positions, delta, layers, band, c.Settings.clearance, rigidIslands, ref stats);
-                if (inside != null) Array.Copy(counts, inside, counts.Length);
+                // a vertex both sides move counts once
+                var pushed = new bool[delta.Length];
+                var counts = AntiClip.Apply(garment.Topology, garment.Positions, delta, layers, band, c.Settings.clearance, rigidIslands, ref stats, pushed);
                 // skin passing between the garment's vertices, which the vertex check cannot see
-                if (self != null && skin != null)
-                    AntiClip.LiftOverSkin(garment.Topology, delta, self, skin, body.Positions, bodyDelta, band, c.Settings.clearance, rigidIslands, ref stats);
+                var skinOutside = self != null && skin != null
+                    ? AntiClip.LiftOverSkin(garment.Topology, delta, self, skin, body.Positions, bodyDelta, band, c.Settings.clearance, rigidIslands, pushed, ref stats)
+                    : 0;
                 bodyLayer = layers.FirstOrDefault(l => l.IsBody && l.Delta == bodyDelta);
+                if (inside != null)
+                {
+                    Array.Copy(counts, inside, counts.Length);
+                    for (var i = 0; i < layers.Count; i++)
+                        if (layers[i] == bodyLayer) inside[i] += skinOutside;
+                }
             }
             // the deformed body collider holds the deformed body's normals; anti-clip usually built it already, otherwise it is built
             // here, and without anti-clip the normals are recomputed

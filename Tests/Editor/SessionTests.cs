@@ -791,7 +791,7 @@ namespace Akiya82.BlendshapeTransfer.Tests
             Assert.That(again.Garments[0].Data.settings.smoothIterations, Is.Not.EqualTo(11));
         }
 
-        /// <summary>A body grid 0.5 mm apart with a nub 3 mm in radius and 5 mm high at its centre, and fabric 5 mm apart 2 mm above it whose vertices nearest the nub sit 3.5 mm from its tip.</summary>
+        /// <summary>A body grid 0.5 mm apart with a nub 3 mm in radius and 5 mm high at its centre, and fabric 5 mm apart 2 mm above it whose vertices nearest the nub sit 3.5 mm from its axis.</summary>
         private (SkinnedMeshRenderer Body, SkinnedMeshRenderer Garment) Nub()
         {
             var bodyMesh = MeshFactory.Grid(MeshFactory.Range(-0.02f, 0.02f, 81), MeshFactory.Range(-0.02f, 0.02f, 81), 0f);
@@ -819,6 +819,22 @@ namespace Akiya82.BlendshapeTransfer.Tests
             Assert.That(g.Collider.Hit(g.Collider.Deformed(result.FinalWorld[0], 1f), tip, 0.05f, out var hit), Is.True);
             Assert.That(SurfaceQuery.Signed(tip, hit), Is.LessThan(-0.0009f), "the tip stays under the fabric by about the 1 mm clearance");
             Assert.That(g.Report.Clip.StillSkin, Is.EqualTo(0));
+            Assert.That(g.Report.Clip.Pushed, Is.GreaterThan(0), "no fabric vertex is inside the skin, so the pushes are the skin side's");
+        }
+
+        [Test]
+        public void Transfer_CountsSkinThroughFabricAntiClipLeftAlone()
+        {
+            var (body, garment) = Nub();
+            var session = TransferSession.Open(body, new[] { garment }, errors);
+            var g = session.Garments[0];
+            g.Data.settings.antiClip = false;
+
+            Assert.That(session.Transfer(null), Is.True);
+
+            Assert.That(g.Report.Clip.StillSkin, Is.GreaterThan(0), "the nub ends outside the fabric at full weight");
+            Assert.That(g.Report.Clip.Intermediate, Is.GreaterThan(0), "and halfway, 2.5 mm over fabric 2 mm up");
+            Assert.That(g.Report.Clip.Pushed, Is.EqualTo(0));
         }
 
         [Test]

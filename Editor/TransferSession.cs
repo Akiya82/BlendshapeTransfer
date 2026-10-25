@@ -642,14 +642,20 @@ namespace Akiya82.BlendshapeTransfer
                 for (var i = 0; i < layers.Count; i++)
                 {
                     var layer = layers[i];
-                    var still = counted && inside[i] >= 0 ? inside[i] : AntiClip.CountInside(snapshot.Positions, result.FinalWorld[f], layer.Collider, layer.Candidates, layer.Delta, band);
-                    if (layer.IsBody) clip.StillSkin += still;
-                    else clip.StillLayer += still;
-                    clip.Intermediate += AntiClip.CountInside(snapshot.Positions, midGarment, layer.Collider, layer.Candidates, Mid(previous[i].Delta, layer.Delta), band);
+                    var recount = !counted || inside[i] < 0;
+                    var still = recount ? AntiClip.CountInside(snapshot.Positions, result.FinalWorld[f], layer.Collider, layer.Candidates, layer.Delta, band) : inside[i];
+                    var midDelta = Mid(previous[i].Delta, layer.Delta);
+                    clip.Intermediate += AntiClip.CountInside(snapshot.Positions, midGarment, layer.Collider, layer.Candidates, midDelta, band);
+                    if (!layer.IsBody)
+                    {
+                        clip.StillLayer += still;
+                        continue;
+                    }
+                    // skin the fabric lets through between its vertices, which the vertex counts cannot see; anti-clip's count holds it
+                    if (recount) still += AntiClip.SkinOutside(Surface.Positions, layer.Delta, g.Collider, g.SkinCandidates, result.FinalWorld[f], band).Count;
+                    clip.StillSkin += still;
+                    clip.Intermediate += AntiClip.SkinOutside(Surface.Positions, midDelta, g.Collider, g.SkinCandidates, midGarment, band).Count;
                 }
-                // skin the fabric lets through between its vertices, which the vertex counts above cannot see
-                clip.StillSkin += AntiClip.SkinOutside(Surface.Positions, bodyDeltas[f], g.Collider, g.SkinCandidates, result.FinalWorld[f], band).Count;
-                clip.Intermediate += AntiClip.SkinOutside(Surface.Positions, Mid(previous[0].Delta, bodyDeltas[f]), g.Collider, g.SkinCandidates, midGarment, band).Count;
             }
             return result;
         }
