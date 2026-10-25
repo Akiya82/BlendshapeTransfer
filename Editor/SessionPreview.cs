@@ -126,6 +126,19 @@ namespace Akiya82.BlendshapeTransfer
             dotsStale = false;
         }
 
+        /// <summary>Back to the snapshot with no dots, when there is no shape to show.</summary>
+        public void ShowRest()
+        {
+            if (shape == null) return;
+            foreach (var m in meshes.Values) m.Update(null, null);
+            shown.Clear();
+            Skin.Clear();
+            Layer.Clear();
+            shape = null;
+            weight = float.NaN;
+            dotsStale = true;
+        }
+
         /// <summary>Queues the visible preview meshes for the camera's next render; the draw calls made.</summary>
         public int Draw(Camera camera, Func<Renderer, bool> visible)
         {

@@ -108,44 +108,48 @@ namespace Akiya82.BlendshapeTransfer
         /// </summary>
         internal int DrawPreview(Camera camera)
         {
-            if (preview == null || !InMainStage() || SceneCheck()) return 0;
-            preview.Reassert();
-            var names = PreviewShapes();
-            if (!names.Contains(previewShape))
+            if (preview == null || !InMainStage()) return 0;
+            // ponytail: each Scene View repaint rechecks the pose, the ticked shapes and the fingerprints (twice with clipping); cache them per change if a large avatar lags
+            var progressShown = false;
+            try
             {
-                previewShape = names.FirstOrDefault();
-                Repaint();
-            }
-            if (previewShape != null)
-            {
-                // the meshes follow a dragged weight slider; the compute waits until no control is held and no text field is edited
-                var idle = GUIUtility.hotControl == 0 && !EditorGUIUtility.editingTextField;
-                var progressShown = false;
-                try
+                if (SceneCheck()) return 0;
+                preview.Reassert();
+                var names = PreviewShapes();
+                var first = names.FirstOrDefault();
+                if (!names.Contains(previewShape) && previewShape != first)
                 {
+                    previewShape = first;
+                    Repaint();
+                }
+                if (previewShape == null) preview.ShowRest();
+                else
+                {
+                    // the meshes follow a dragged weight slider; the compute waits until no control is held and no text field is edited
+                    var idle = GUIUtility.hotControl == 0 && !EditorGUIUtility.editingTextField;
                     preview.Show(previewShape, previewWeight, showClipping, idle, (info, progress) =>
                     {
                         progressShown = true;
                         EditorUtility.DisplayProgressBar(L.Get("window.title"), L.Format("progress.preview", info), progress);
                     });
                 }
-                catch (Exception e)
-                {
-                    // once, not on every repaint: the preview ends and the status line says why
-                    Debug.LogException(e);
-                    statusOverride = L.Format("status.previewFailed", e.Message);
-                    tab = TransferTab;
-                    EndPreview();
-                    Repaint();
-                    return 0;
-                }
-                finally
-                {
-                    // another tool's progress bar is not ours to clear
-                    if (progressShown) EditorUtility.ClearProgressBar();
-                }
+                return preview.Draw(camera, Visible);
             }
-            return preview.Draw(camera, Visible);
+            catch (Exception e)
+            {
+                // once, not on every repaint: the preview ends and the status line says why
+                Debug.LogException(e);
+                statusOverride = L.Format("status.previewFailed", e.Message);
+                tab = TransferTab;
+                EndPreview();
+                Repaint();
+                return 0;
+            }
+            finally
+            {
+                // another tool's progress bar is not ours to clear
+                if (progressShown) EditorUtility.ClearProgressBar();
+            }
         }
 
         /// <summary>
@@ -161,7 +165,10 @@ namespace Akiya82.BlendshapeTransfer
                 Repaint();
                 return true;
             }
+            var was = poseChanged;
             poseChanged = session.PoseChanged();
+            // the window may show the warning and an enabled Transfer button
+            if (poseChanged != was) Repaint();
             return false;
         }
 
@@ -172,8 +179,8 @@ namespace Akiya82.BlendshapeTransfer
             if (e.type == EventType.MouseDown && e.button == 0 && !e.alt)
             {
                 NoteSceneMouse(EditorApplication.timeSinceStartup);
-                // not used: Unity's own selection still happens
-                ScenePick(HandleUtility.GUIPointToWorldRay(e.mousePosition));
+                // not on the label, and not while the View tool pans; not used: Unity's own selection still happens
+                if (!Tools.viewToolActive && !LabelRect(view).Contains(e.mousePosition)) ScenePick(HandleUtility.GUIPointToWorldRay(e.mousePosition));
             }
             // rawType: Unity's picking may have used the mouse-up already
             else if (e.rawType == EventType.MouseUp && e.button == 0) NoteSceneMouse(EditorApplication.timeSinceStartup);
@@ -214,16 +221,21 @@ namespace Akiya82.BlendshapeTransfer
 
             static void Dots(List<Vector3> points, Color color)
             {
-                Handles.color = color;
-                foreach (var p in points) Handles.DotHandleCap(0, p, Quaternion.identity, HandleUtility.GetHandleSize(p) * 0.025f, EventType.Repaint);
+                using (new Handles.DrawingScope(color))
+                    foreach (var p in points) Handles.DotHandleCap(0, p, Quaternion.identity, HandleUtility.GetHandleSize(p) * 0.025f, EventType.Repaint);
             }
+        }
+
+        private static Rect LabelRect(SceneView view)
+        {
+            var height = view.camera.pixelRect.height / EditorGUIUtility.pixelsPerPoint;
+            return new Rect(8f, height - 78f, 360f, 70f);
         }
 
         private void DrawSceneLabel(SceneView view)
         {
             Handles.BeginGUI();
-            var height = view.camera.pixelRect.height / EditorGUIUtility.pixelsPerPoint;
-            GUILayout.BeginArea(new Rect(8f, height - 78f, 360f, 70f), EditorStyles.helpBox);
+            GUILayout.BeginArea(LabelRect(view), EditorStyles.helpBox);
             GUILayout.Label(L.Format("edit.label", previewShape ?? "—", previewWeight), EditorStyles.boldLabel);
             // always drawn: the pose check runs in the Repaint pass, and Layout and Repaint must draw the same controls
             GUILayout.Label(poseChanged ? L.Get("edit.poseChangedShort") : "", EditorStyles.miniLabel);

@@ -200,7 +200,7 @@
   "edit.layers.tip": "目のアイコンでプレビューのメッシュを表示・非表示にします。衣装をクリックすると現在の衣装になります。",
   "edit.eye": "プレビューでこのメッシュを表示・非表示",
   "edit.label": "Blendshape Transfer: {0} {1:0}",
-  "edit.poseChangedShort": "読み込み後にポーズかウェイトが変わりました。プレビューは読み込んだメッシュを表示しています。",
+  "edit.poseChangedShort": "読み込み後にポーズかウェイトが変わりました。",
   "edit.endPreview": "プレビューを終了",
   "edit.endPreview.tip": "実際のレンダラーを再び表示し、ウィンドウを「転送」タブに切り替えます。",
   "progress.preview": "プレビューを計算中: {0}",

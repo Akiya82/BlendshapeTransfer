@@ -200,7 +200,7 @@
   "edit.layers.tip": "The eye shows or hides a mesh in the preview; clicking a garment makes it the current one.",
   "edit.eye": "Show or hide this mesh in the preview",
   "edit.label": "Blendshape Transfer: {0} {1:0}",
-  "edit.poseChangedShort": "The pose or a weight changed since the read: the preview shows the read meshes.",
+  "edit.poseChangedShort": "The pose or a weight changed since the read.",
   "edit.endPreview": "End preview",
   "edit.endPreview.tip": "Shows the real renderers again and switches the window to the Transfer tab.",
   "progress.preview": "Computing the preview: {0}",

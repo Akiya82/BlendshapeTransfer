@@ -200,7 +200,7 @@
   "edit.layers.tip": "眼睛图标在预览中显示或隐藏网格；点击服装将其设为当前服装。",
   "edit.eye": "在预览中显示或隐藏此网格",
   "edit.label": "Blendshape Transfer: {0} {1:0}",
-  "edit.poseChangedShort": "读取后姿势或权重发生了变化：预览显示的是读取时的网格。",
+  "edit.poseChangedShort": "读取后姿势或权重已改变。",
   "edit.endPreview": "结束预览",
   "edit.endPreview.tip": "重新显示真实的渲染器，并将窗口切换到“传递”标签页。",
   "progress.preview": "正在计算预览：{0}",

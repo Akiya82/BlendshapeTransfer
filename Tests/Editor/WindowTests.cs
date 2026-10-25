@@ -468,24 +468,33 @@ namespace Akiya82.BlendshapeTransfer.Tests
         public void OutsideTheMainStage_TheSceneViewDrawsAndPicksNothing()
         {
             Localization.Override = "en";
-            OpenTransferred();
-            var top = window.Session.Garments[0].Renderer;
+            var body = Body();
+            var top = Top();
+            var outer = rig.AddRenderer("Outer", Saved(MeshFactory.Grid(MeshFactory.Range(-0.05f, 0.05f, 21), MeshFactory.Range(-0.05f, 0.05f, 21), 0.006f), "Outer"), "Hips");
+            window = ScriptableObject.CreateInstance<ShapeTransferWindow>();
+            window.AllOpen = true;
+            window.ShowUtility();
+            window.position = new Rect(100f, 100f, 620f, 900f);
+            window.SetUp(body, new[] { top, outer });
+            window.Read();
+            window.RunTransfer(false);
             var material = new Material(Shader.Find("Hidden/Internal-Colored"));
             var mainStage = ShapeTransferWindow.InMainStage;
             try
             {
                 // the owner's editor may be in prefab mode while the tests run
                 ShapeTransferWindow.InMainStage = () => true;
-                top.sharedMaterial = material;
+                outer.sharedMaterial = material;
                 var camera = new GameObject("Camera").AddComponent<Camera>();
                 window.Tab = ShapeTransferWindow.EditTab;
                 Paint(window);
                 var down = new Ray(new Vector3(0.01f, 0.01f, 1f), Vector3.back);
+                Assert.That(window.CurrentGarment, Is.SameAs(top));
                 Assert.That(window.DrawPreview(camera), Is.GreaterThan(0));
                 Assert.That(window.ScenePick(down), Is.True);
-                Assert.That(window.CurrentGarment, Is.SameAs(top));
+                Assert.That(window.CurrentGarment, Is.SameAs(outer), "the nearest garment under the click becomes current");
                 Assert.That(window.ScenePick(new Ray(new Vector3(0.5f, 0f, 1f), Vector3.back)), Is.False, "a miss");
-                Assert.That(window.CurrentGarment, Is.SameAs(top), "keeps the current garment");
+                Assert.That(window.CurrentGarment, Is.SameAs(outer), "keeps the current garment");
 
                 ShapeTransferWindow.InMainStage = () => false;
 
