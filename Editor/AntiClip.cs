@@ -355,9 +355,9 @@ namespace Akiya82.BlendshapeTransfer
             }
             for (var v = 0; v < delta.Length; v++)
             {
-                var any = push[v] != Vector3.zero;
-                if (moved != null) moved[v] = any;
-                if (!any) continue;
+                var nonZero = push[v] != Vector3.zero;
+                if (moved != null) moved[v] = nonZero;
+                if (!nonZero) continue;
                 delta[v] += push[v];
                 if (!pushed[v]) { pushed[v] = true; stats.Pushed++; }
                 stats.MaxPush = Mathf.Max(stats.MaxPush, push[v].magnitude);

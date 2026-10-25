@@ -881,19 +881,21 @@ namespace Akiya82.BlendshapeTransfer
         /// </summary>
         internal (List<int> Skin, List<int> Layer, List<int> Through) ClippingAt(int k, string name, float w)
         {
-            // ponytail: each garment's call moves the body and its lower garments again; build them once per shape and weight if Show clipping lags on release
+            // ponytail: each garment's call moves the body, its lower garments and its own sheet again; build them once per shape and weight if Show clipping lags on release
             var g = Garments[k];
             var band = Mathf.Max(AntiClip.MinBand, g.Reach.TryGetValue(name, out var reach) ? reach : 0f);
             var offset = GarmentOffset(g, name, w) ?? new Vector3[g.Snapshot.Positions.Length];
             var skin = new List<int>();
             var layer = new HashSet<int>();
-            foreach (var l in LayersAt(k, name, w))
+            var layers = LayersAt(k, name, w);
+            foreach (var l in layers)
             {
                 var inside = AntiClip.Inside(g.Snapshot.Positions, offset, l.Collider, l.Candidates, l.Delta, band);
                 if (l.IsBody) skin.AddRange(inside);
                 else layer.UnionWith(inside);
             }
-            var through = AntiClip.SkinOutside(Surface.Positions, BodyOffset(name, w), g.Collider, g.SkinCandidates, offset, band);
+            // LayersAt puts the body first
+            var through = AntiClip.SkinOutside(Surface.Positions, layers[0].Delta, g.Collider, g.SkinCandidates, offset, band);
             return (skin, layer.OrderBy(v => v).ToList(), through);
         }
 
