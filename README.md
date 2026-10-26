@@ -11,7 +11,8 @@ and of the garments under it. The window is available in English, Russian, Japan
    - `https://akiya82.github.io/vpm/index.json`
 2. In **Manage Project**, add **Blendshape Transfer**. VCC installs Modular Avatar with it.
 
-Requires Unity 2022.3, VRChat Avatars SDK 3.10 or later and Modular Avatar 1.18 or later.
+Requires Unity 2022.3, VRChat Avatars SDK 3.10 or later, Modular Avatar 1.18 or later and NDMF 1.14.7 or later
+(Modular Avatar installs it).
 
 ## Use
 
@@ -20,6 +21,8 @@ Requires Unity 2022.3, VRChat Avatars SDK 3.10 or later and Modular Avatar 1.18 
 3. **Read meshes**, then check each garment's settings and its ticked shapes.
 4. **Transfer** computes the garments whose inputs changed; **All again** computes every garment.
 5. **Save** puts each garment's output mesh on its renderer and binds the shapes with MA Blendshape Sync.
+6. On the **Edit** tab, pick a shape and a weight to see it on the avatar in the Scene View. **Show clipping** marks where a
+   garment goes into the skin (red) or into a lower garment (orange), and where skin comes through a garment (red).
 
 Outputs are written to `Assets/BlendshapeTransferGenerated/<avatar>/` in your project. The original meshes are not modified,
 and **Restore original mesh** puts a garment back on its source mesh.

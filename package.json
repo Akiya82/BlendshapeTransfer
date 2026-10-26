@@ -1,7 +1,7 @@
 {
   "name": "dev.akiya82.blendshapetransfer",
   "displayName": "Blendshape Transfer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "unity": "2022.3",
   "description": "Transfers body blendshapes onto clothing meshes and binds them to the body with MA Blendshape Sync.",
   "author": {
